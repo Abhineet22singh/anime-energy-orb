@@ -193,6 +193,45 @@ function notifyHandTracked() {
   }
 }
 
+let perfectFramingTimer = 0;
+let hintDismissed = false;
+
+export function updateFramingGuidance(hasFace, hasHand, dt = 0.016) {
+  if (hintDismissed) return;
+  const hint = els.onboardingHint;
+  const text = document.getElementById('hint-text');
+  if (!hint || !text) return;
+
+  if (hasFace && hasHand) {
+    perfectFramingTimer += dt;
+    text.textContent = '✨ Perfect Framing — Energy Locked!';
+    hint.classList.remove('fade-out');
+    if (perfectFramingTimer > 2.5) {
+      hint.classList.add('fade-out');
+      hintDismissed = true;
+    }
+  } else if (hasFace && !hasHand) {
+    perfectFramingTimer = 0;
+    text.textContent = 'Face detected — Raise your open palm beside your face';
+    hint.classList.remove('fade-out');
+  } else if (!hasFace && hasHand) {
+    perfectFramingTimer = 0;
+    text.textContent = 'Hand detected — Frame your face together with your hand';
+    hint.classList.remove('fade-out');
+  } else {
+    perfectFramingTimer = 0;
+    text.textContent = 'Frame both your face and your raised hand in view';
+    hint.classList.remove('fade-out');
+  }
+}
+
+export function resetFramingHint() {
+  perfectFramingTimer = 0;
+  hintDismissed = false;
+  const hint = els.onboardingHint;
+  if (hint) hint.classList.remove('fade-out');
+}
+
 /**
  * Composite Mirror Selfie Photo Capture
  * Blends live mirrored camera feed + Three.js canvas into an HD photo download

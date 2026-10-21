@@ -22,7 +22,7 @@ import { HandSkeleton } from './handSkeleton.js';
 import { soundFX } from './audio.js';
 import {
   initUI, setModelReady, setStatusText, enterExperience, setGestureDisplay,
-  getSettings, setupCompositeScreenshot,
+  getSettings, setupCompositeScreenshot, updateFramingGuidance, resetFramingHint,
 } from './ui.js';
 
 // ── Application State ──
@@ -145,6 +145,7 @@ function handleReset() {
   orb.setScale(1);
   soundFX.update(0, 0, 0);
   setGestureDisplay('none');
+  resetFramingHint();
 }
 
 // ── User Input & Gestures ──
@@ -342,6 +343,8 @@ function animate(now) {
 
     hands = processGestures(vision.hands, dt);
     const anyPresent = hands.some((h) => h.present);
+    const hasFace = !!(vision.face && vision.face.faceLandmarks && vision.face.faceLandmarks.length > 0);
+    updateFramingGuidance(hasFace, anyPresent, dt);
 
     if (anyPresent) {
       const primary = hands.find((h) => h.present);
