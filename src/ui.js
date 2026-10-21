@@ -14,6 +14,7 @@ let settings = {
   smokeEnabled: true,
   particlesEnabled: true,
   arcsEnabled: true,
+  filamentsEnabled: true,
   skeletonEnabled: true,
   soundEnabled: true,
 };
@@ -57,6 +58,7 @@ export function initUI(callbacks) {
   els.toggleSmoke = document.getElementById('toggle-smoke');
   els.toggleParticles = document.getElementById('toggle-particles');
   els.toggleArcs = document.getElementById('toggle-arcs');
+  els.toggleFilaments = document.getElementById('toggle-filaments');
   els.toggleSkeleton = document.getElementById('toggle-skeleton');
 
   // Sound button
@@ -65,6 +67,11 @@ export function initUI(callbacks) {
       const state = onSoundToggle();
       els.btnSound.textContent = state ? '🔊' : '🔇';
     }
+  });
+
+  // Filaments toggle
+  els.toggleFilaments?.addEventListener('change', (e) => {
+    settings.filamentsEnabled = e.target.checked;
   });
 
   // Skeleton toggle

@@ -1,83 +1,115 @@
 /**
- * smoke.js – Volumetric smoke particles around the orb
+ * smoke.js – Organic curling anime smoke & expanding energy waves
+ *
+ * Implements:
+ * 1. Wispy, semi-transparent blue-white smoke curling around orb and hand
+ * 2. Large expanding energy waves that drift across the scene with delicate transparency
+ * 3. Motion trails responding to hand speed and velocity
+ * 4. Procedural GPU noise distortion for organic, irregular non-circular shapes
  */
 
 import * as THREE from 'three';
 
-const MAX_SMOKE = 200;
+const LOCAL_SMOKE_COUNT = 160;
+const EXPANDING_WAVE_COUNT = 70;
 
-// ── Smoke vertex shader ──
-const smokeVert = /* glsl */ `
+// ── Organic Smoke Vertex Shader ──
+const smokeVertexShader = /* glsl */ `
   attribute float aSize;
   attribute float aLife;
   attribute float aRotation;
   attribute float aBirth;
   attribute vec3 aVelocity;
+  attribute float aType; // 0 = local curling wisp, 1 = expanding scene wave
   uniform float uTime;
   uniform float uIntensity;
   varying float vLife;
   varying float vRotation;
   varying float vAlpha;
+  varying float vType;
 
   void main() {
     float age = uTime - aBirth;
     float maxLife = aLife;
     float t = clamp(age / maxLife, 0.0, 1.0);
 
-    if (t >= 1.0) {
-      // Dead particle – hide it
+    vType = aType;
+    vLife = t;
+
+    if (t >= 1.0 || uIntensity <= 0.001) {
       gl_PointSize = 0.0;
       gl_Position = vec4(99999.0);
       vAlpha = 0.0;
       return;
     }
 
-    vLife = t;
-    vRotation = aRotation + uTime * 0.5;
+    // Dynamic rotation with slight acceleration
+    vRotation = aRotation + age * (aType > 0.5 ? 0.15 : 0.45);
 
-    // Expand outward + drift upward
-    vec3 pos = position + aVelocity * age + vec3(0.0, age * 0.04, 0.0);
+    // Position trajectory: velocity + upward thermal convection + subtle curl turbulence
+    vec3 curl = vec3(
+      sin(age * 3.5 + aRotation) * 0.02,
+      age * (aType > 0.5 ? 0.08 : 0.14),
+      cos(age * 3.5 + aRotation) * 0.02
+    );
 
+    vec3 pos = position + aVelocity * age + curl;
     vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
 
-    // Grow then shrink
-    float sizeCurve = sin(t * 3.14159) * 0.8 + 0.2;
-    float size = aSize * sizeCurve * uIntensity * (250.0 / max(-mvPos.z, 1.0));
+    // Particle scale evolution (starts compact, expands into airy wisps)
+    float expansion = aType > 0.5 ? (1.0 + t * 4.5) : (0.4 + sin(t * 3.14159) * 0.9);
+    float size = aSize * expansion * uIntensity * (280.0 / max(-mvPos.z, 0.5));
     gl_PointSize = size;
 
-    // Fade in quickly, fade out slowly
-    vAlpha = smoothstep(0.0, 0.1, t) * smoothstep(1.0, 0.4, t) * uIntensity * 0.4;
+    // Organic fade envelope (fast rise, gentle long dissipation)
+    float fadeIn = smoothstep(0.0, 0.18, t);
+    float fadeOut = smoothstep(1.0, 0.45, t);
+    float baseOpacity = aType > 0.5 ? 0.15 : 0.45; // Expanding waves are delicate & translucent
+    vAlpha = fadeIn * fadeOut * uIntensity * baseOpacity;
 
     gl_Position = projectionMatrix * mvPos;
   }
 `;
 
-const smokeFrag = /* glsl */ `
+// ── Organic Smoke Fragment Shader with Procedural Fractal Wisps ──
+const smokeFragmentShader = /* glsl */ `
   varying float vLife;
   varying float vRotation;
   varying float vAlpha;
-  uniform vec3 uColor;
+  varying float vType;
+  uniform vec3 uColorWisp;
+  uniform vec3 uColorWave;
 
   void main() {
-    // Rotate UV
+    if (vAlpha <= 0.005) discard;
+
+    // Rotated UV coordinates
     vec2 uv = gl_PointCoord - 0.5;
     float c = cos(vRotation);
     float s = sin(vRotation);
     uv = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
-    uv += 0.5;
 
-    float d = length(uv - 0.5) * 2.0;
-    if (d > 1.0) discard;
+    float dist = length(uv) * 2.0;
+    if (dist > 1.0) discard;
 
-    // Soft circle with wispy edges
-    float alpha = smoothstep(1.0, 0.4, d) * vAlpha;
+    // Multi-octave procedural tendril distortion (irregular, airy anime smoke)
+    float angle = atan(uv.y, uv.x);
+    float tendril1 = sin(angle * 3.0 + dist * 5.0 + vLife * 4.0) * 0.18;
+    float tendril2 = sin(angle * 7.0 - dist * 8.0) * 0.12;
+    float distortedDist = dist + tendril1 + tendril2;
 
-    // Add some interior variation
-    float noise = sin(uv.x * 20.0 + vLife * 10.0) * sin(uv.y * 20.0 - vLife * 8.0);
-    noise = noise * 0.15 + 0.85;
+    // Soft organic falloff
+    float shape = smoothstep(1.0, 0.25, distortedDist);
 
-    vec3 col = uColor * noise;
-    gl_FragColor = vec4(col, alpha);
+    // Internal density variations (cloud wisps)
+    float internalNoise = sin(uv.x * 14.0 + vLife * 6.0) * cos(uv.y * 14.0 - vLife * 5.0);
+    shape *= 0.75 + internalNoise * 0.25;
+
+    // Color gradient: pale luminous cyan-white core fading to translucent azure
+    vec3 baseCol = vType > 0.5 ? uColorWave : uColorWisp;
+    vec3 col = mix(baseCol, vec3(0.9, 0.98, 1.0), shape * 0.65);
+
+    gl_FragColor = vec4(col, shape * vAlpha);
   }
 `;
 
@@ -85,27 +117,30 @@ export class OrbSmoke {
   constructor() {
     this.group = new THREE.Group();
     this.time = 0;
-    this.emitTimer = 0;
+    this.localEmitTimer = 0;
+    this.waveEmitTimer = 0;
     this.nextIndex = 0;
-    this.active = false;
+    this.totalParticles = LOCAL_SMOKE_COUNT + EXPANDING_WAVE_COUNT;
 
-    this._createParticles();
+    this._createParticleSystem();
   }
 
-  _createParticles() {
+  _createParticleSystem() {
+    const N = this.totalParticles;
     const geo = new THREE.BufferGeometry();
-    const positions = new Float32Array(MAX_SMOKE * 3);
-    const sizes = new Float32Array(MAX_SMOKE);
-    const lives = new Float32Array(MAX_SMOKE);
-    const rotations = new Float32Array(MAX_SMOKE);
-    const births = new Float32Array(MAX_SMOKE);
-    const velocities = new Float32Array(MAX_SMOKE * 3);
+    const positions = new Float32Array(N * 3);
+    const sizes = new Float32Array(N);
+    const lives = new Float32Array(N);
+    const rotations = new Float32Array(N);
+    const births = new Float32Array(N);
+    const velocities = new Float32Array(N * 3);
+    const types = new Float32Array(N);
 
-    // Initialise all particles as dead (birth far in the past)
-    for (let i = 0; i < MAX_SMOKE; i++) {
-      births[i] = -1000;
-      lives[i] = 1;
-      sizes[i] = 1;
+    for (let i = 0; i < N; i++) {
+      births[i] = -9999;
+      lives[i] = 1.0;
+      sizes[i] = 1.0;
+      types[i] = i >= LOCAL_SMOKE_COUNT ? 1.0 : 0.0;
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -114,16 +149,18 @@ export class OrbSmoke {
     geo.setAttribute('aRotation', new THREE.BufferAttribute(rotations, 1));
     geo.setAttribute('aBirth', new THREE.BufferAttribute(births, 1));
     geo.setAttribute('aVelocity', new THREE.BufferAttribute(velocities, 3));
+    geo.setAttribute('aType', new THREE.BufferAttribute(types, 1));
 
     this.geometry = geo;
 
     this.material = new THREE.ShaderMaterial({
-      vertexShader: smokeVert,
-      fragmentShader: smokeFrag,
+      vertexShader: smokeVertexShader,
+      fragmentShader: smokeFragmentShader,
       uniforms: {
         uTime: { value: 0 },
         uIntensity: { value: 0 },
-        uColor: { value: new THREE.Color(0.1, 0.3, 0.6) },
+        uColorWisp: { value: new THREE.Color(0.25, 0.72, 1.0) }, // Pale blue-white wisp
+        uColorWave: { value: new THREE.Color(0.18, 0.55, 0.95) }, // Translucent scene wave
       },
       transparent: true,
       depthWrite: false,
@@ -134,73 +171,86 @@ export class OrbSmoke {
     this.group.add(this.points);
   }
 
-  /**
-   * Emit a smoke particle.
-   */
-  _emit(speed, charge) {
-    const i = this.nextIndex;
-    this.nextIndex = (this.nextIndex + 1) % MAX_SMOKE;
+  _emit(type, orbPos, handVel, charge, scaleMultiplier) {
+    let index;
+    if (type === 0) {
+      // Local curling wisp (indices 0 .. LOCAL_SMOKE_COUNT-1)
+      this.localIndex = ((this.localIndex || 0) + 1) % LOCAL_SMOKE_COUNT;
+      index = this.localIndex;
+    } else {
+      // Expanding scene wave (indices LOCAL_SMOKE_COUNT .. N-1)
+      this.waveIndex = ((this.waveIndex || 0) + 1) % EXPANDING_WAVE_COUNT;
+      index = LOCAL_SMOKE_COUNT + this.waveIndex;
+    }
 
     const pos = this.geometry.attributes.position;
     const sizes = this.geometry.attributes.aSize;
     const lives = this.geometry.attributes.aLife;
-    const rotations = this.geometry.attributes.aRotation;
+    const rots = this.geometry.attributes.aRotation;
     const births = this.geometry.attributes.aBirth;
     const vels = this.geometry.attributes.aVelocity;
 
-    // Random position near origin
+    // Origin around orb
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(Math.random() * 2 - 1);
-    const r = 0.05 + Math.random() * 0.08;
-    pos.array[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
-    pos.array[i * 3 + 1] = Math.sin(phi) * Math.sin(theta) * r;
-    pos.array[i * 3 + 2] = Math.cos(phi) * r;
+    const r = (type === 0 ? 0.04 + Math.random() * 0.05 : 0.08 + Math.random() * 0.08) * scaleMultiplier;
 
-    sizes.array[i] = (Math.random() * 12 + 6) * (1 + charge * 0.5);
-    lives.array[i] = Math.random() * 1.5 + 0.8;
-    rotations.array[i] = Math.random() * Math.PI * 2;
-    births.array[i] = this.time;
+    pos.array[index * 3] = orbPos.x + Math.sin(phi) * Math.cos(theta) * r;
+    pos.array[index * 3 + 1] = orbPos.y + Math.sin(phi) * Math.sin(theta) * r;
+    pos.array[index * 3 + 2] = orbPos.z + Math.cos(phi) * r;
 
-    // Velocity: outward + turbulence
-    const vSpeed = (0.02 + Math.random() * 0.04) * (1 + speed * 0.5 + charge * 0.3);
-    vels.array[i * 3] = (Math.random() - 0.5) * vSpeed * 2;
-    vels.array[i * 3 + 1] = Math.random() * vSpeed;
-    vels.array[i * 3 + 2] = (Math.random() - 0.5) * vSpeed * 2;
+    // Life duration
+    lives.array[index] = type === 0 ? (1.2 + Math.random() * 0.8) : (2.4 + Math.random() * 1.4);
+    rots.array[index] = Math.random() * Math.PI * 2;
+    births.array[index] = this.time;
+
+    // Scale
+    if (type === 0) {
+      sizes.array[index] = (9.0 + Math.random() * 8.0) * scaleMultiplier;
+    } else {
+      // Expanding wave is larger
+      sizes.array[index] = (22.0 + Math.random() * 18.0) * scaleMultiplier;
+    }
+
+    // Velocity: outward expansion + hand motion trails + upward float
+    const speedMag = (type === 0 ? 0.035 : 0.065) * (1.0 + charge * 0.5) * scaleMultiplier;
+    const trailBiasX = -handVel.x * 0.35;
+    const trailBiasY = -handVel.y * 0.35;
+
+    vels.array[index * 3] = (Math.random() - 0.5) * speedMag * 2.0 + trailBiasX;
+    vels.array[index * 3 + 1] = Math.random() * speedMag * 1.5 + 0.02 * scaleMultiplier + trailBiasY;
+    vels.array[index * 3 + 2] = (Math.random() - 0.5) * speedMag * 2.0;
 
     pos.needsUpdate = true;
     sizes.needsUpdate = true;
     lives.needsUpdate = true;
-    rotations.needsUpdate = true;
+    rots.needsUpdate = true;
     births.needsUpdate = true;
     vels.needsUpdate = true;
   }
 
-  /**
-   * Update each frame.
-   * @param {number} dt – delta time in seconds
-   * @param {number} intensity – overall intensity (0 when hidden)
-   * @param {number} densityScale – density multiplier from UI
-   * @param {number} handSpeed – how fast the hand is moving
-   * @param {number} charge – charge level 0-1
-   */
-  update(dt, intensity, densityScale, handSpeed, charge) {
+  update(dt, orbPos, intensity, densityScale, handSpeed, handVel, charge, scaleMultiplier = 1.0) {
     this.time += dt;
     this.material.uniforms.uTime.value = this.time;
     this.material.uniforms.uIntensity.value = intensity * densityScale;
 
-    // Emit rate based on intensity and hand speed
-    if (intensity > 0.05) {
-      const rate = (8 + handSpeed * 20 + charge * 15) * densityScale;
-      this.emitTimer += dt * rate;
-      while (this.emitTimer >= 1) {
-        this._emit(handSpeed, charge);
-        this.emitTimer -= 1;
+    if (intensity > 0.02) {
+      // 1. Emit local curling smoke wisps
+      const localRate = (14.0 + handSpeed * 32.0 + charge * 20.0) * densityScale;
+      this.localEmitTimer += dt * localRate;
+      while (this.localEmitTimer >= 1.0) {
+        this._emit(0, orbPos, handVel, charge, scaleMultiplier);
+        this.localEmitTimer -= 1.0;
+      }
+
+      // 2. Emit expanding scene waves
+      const waveRate = (2.5 + charge * 4.0 + handSpeed * 6.0) * densityScale;
+      this.waveEmitTimer += dt * waveRate;
+      while (this.waveEmitTimer >= 1.0) {
+        this._emit(1, orbPos, handVel, charge, scaleMultiplier);
+        this.waveEmitTimer -= 1.0;
       }
     }
-  }
-
-  setPosition(x, y, z) {
-    this.group.position.set(x, y, z);
   }
 
   dispose() {

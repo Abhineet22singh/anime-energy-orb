@@ -1,8 +1,11 @@
 /**
  * main.js – Application entry point
  *
- * Ties together camera, hand tracking, gestures, 3D rendering,
- * procedural GLSL shaders, audio synthesis, and visual effects.
+ * Exact reference recreation of the anime hand energy VFX.
+ * Ties together real-time camera tracking, precision perspective mapping,
+ * blue-white luminous energy orb with plasma distortion,
+ * organic orange/amber energy filaments wrapping around the fingers,
+ * curling blue smoke and expanding energy waves, sparks, and procedural audio.
  */
 
 import * as THREE from 'three';
@@ -10,6 +13,7 @@ import { startCamera, stopCamera, isCameraReady, getVideo } from './camera.js';
 import { initHandTracking, detectHands, isTrackingReady } from './handTracking.js';
 import { processGestures, isTwoHandOpen, twoHandMidpoint, twoHandDistance } from './gestures.js';
 import { EnergyOrb } from './orb.js';
+import { OrangeFilaments } from './orangeFilaments.js';
 import { OrbParticles } from './particles.js';
 import { OrbSmoke } from './smoke.js';
 import { createPostProcessing, ElectricalArcs, ShockwaveRing } from './effects.js';
@@ -22,7 +26,7 @@ import {
 
 // ── State ──
 let renderer, scene, camera, composer, bloomPass;
-let orb, particles, smoke, arcs, shockwave, handSkeleton;
+let orb, orangeFilaments, particles, smoke, arcs, shockwave, handSkeleton;
 let running = false;
 let demoMode = false;
 let lastTime = 0;
@@ -43,9 +47,8 @@ async function init() {
     onSoundToggle: () => soundFX.toggle(),
   });
 
-  setLoadingText('Initialising 3D renderer…');
+  setLoadingText('Initialising 3D VFX renderer…');
 
-  // Three.js setup
   const canvas = document.getElementById('three-canvas');
   renderer = new THREE.WebGLRenderer({
     canvas,
@@ -65,45 +68,50 @@ async function init() {
 
   scene.add(new THREE.AmbientLight(0x112244, 0.3));
 
-  // Visual Effect Components
+  // 1. Blue-White Luminous Energy Orb
   orb = new EnergyOrb();
   scene.add(orb.group);
 
+  // 2. Orange & Amber Energy Filaments wrapping around fingers & palm
+  orangeFilaments = new OrangeFilaments();
+  scene.add(orangeFilaments.group);
+
+  // 3. Fine Sparks & Floating Particles
   particles = new OrbParticles();
   scene.add(particles.group);
 
+  // 4. Curling Blue Smoke & Expanding Energy Waves
   smoke = new OrbSmoke();
   scene.add(smoke.group);
 
+  // 5. Electrical Arcs
   arcs = new ElectricalArcs();
   scene.add(arcs.group);
 
+  // 6. Shockwave Ring VFX
   shockwave = new ShockwaveRing();
   scene.add(shockwave.group);
 
+  // 7. Hand Energy Stream (Knuckle-joint lines)
   handSkeleton = new HandSkeleton();
   scene.add(handSkeleton.group);
 
-  // Post-processing
+  // 8. Post-Processing Pipeline
   const pp = createPostProcessing(renderer, scene, camera, window.innerWidth, window.innerHeight);
   composer = pp.composer;
   bloomPass = pp.bloomPass;
 
-  // Screenshot
   setupScreenshot(renderer);
-
-  // Event Listeners
   window.addEventListener('resize', onResize);
   setupInteractionEvents();
 
-  // Load hand tracking model
-  setLoadingText('Downloading MediaPipe hand tracking model…');
+  setLoadingText('Loading MediaPipe Hand Landmarker…');
   try {
     await initHandTracking((msg) => setLoadingText(msg));
     setLoadingText('Ready!');
   } catch (err) {
-    console.warn('Hand tracking init fallback:', err);
-    setLoadingText('Hand tracking unavailable – click Demo Mode');
+    console.warn('Hand tracking init error, defaulting to Demo Mode:', err);
+    setLoadingText('Camera unavailable – use Demo Mode');
   }
 
   showApp();
@@ -115,7 +123,6 @@ async function init() {
 // ── Interaction Events ──
 
 function setupInteractionEvents() {
-  // Mouse position
   window.addEventListener('mousemove', (e) => {
     mousePos.x = e.clientX / window.innerWidth;
     mousePos.y = e.clientY / window.innerHeight;
@@ -126,7 +133,6 @@ function setupInteractionEvents() {
     soundFX.init();
     soundFX.resume();
 
-    // Ignore clicks on control panels
     if (e.target.closest('#side-panel, #top-bar, #bottom-bar')) return;
 
     if (demoMode) {
@@ -135,14 +141,13 @@ function setupInteractionEvents() {
       setGestureDisplay(g);
       if (g === 'open' && prevGesture === 'fist') {
         soundFX.playBurst(1.2);
-        const w = palmToWorld(mousePos);
+        const w = palmToWorld(mousePos, 0.12);
         shockwave.trigger(w.x, w.y, w.z, getSettings().orbSize);
       }
       prevGesture = g;
     }
   });
 
-  // Mouse wheel to adjust orb size
   window.addEventListener('wheel', (e) => {
     const slider = document.getElementById('slider-orb-size');
     if (!slider) return;
@@ -152,7 +157,6 @@ function setupInteractionEvents() {
     getSettings().orbSize = newVal;
   }, { passive: true });
 
-  // Keyboard Shortcuts
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space') {
       e.preventDefault();
@@ -187,9 +191,9 @@ async function handleStart() {
     setStarted();
     running = true;
   } catch (err) {
-    console.error('Camera error:', err);
+    console.error('Camera access error:', err);
     setCameraStatus(false);
-    alert('Camera access denied or unavailable.\nSwitching to Demo Mode instead.');
+    alert('Webcam access was denied or is unavailable.\nOpening Demo Mode instead.');
     handleDemo();
   }
 }
@@ -203,6 +207,7 @@ function handleStop() {
   setGestureDisplay('none');
   setStopped();
   orb.hide();
+  orangeFilaments.hide();
   soundFX.update(0, 0, 0);
 }
 
@@ -217,10 +222,12 @@ function handleDemo() {
   setGestureDisplay(DEMO_GESTURES[demoGestureIndex]);
   setStarted();
   orb.show();
+  orangeFilaments.show();
 }
 
 function handleReset() {
   orb.hide();
+  orangeFilaments.hide();
   orb.setCharge(0);
   orb.setScale(1);
   soundFX.update(0, 0, 0);
@@ -242,8 +249,8 @@ function onResize() {
 
 // ── Precision Mapping from Video Coordinates to 3D World ──
 
-function palmToWorld(pt, offsetUp = 0.15) {
-  let screenX = 1 - pt.x; // Mirrored video
+function palmToWorld(pt, offsetUp = 0.12) {
+  let screenX = 1 - pt.x; // Mirrored video feed
   let screenY = pt.y;
 
   const video = getVideo();
@@ -272,7 +279,7 @@ function palmToWorld(pt, offsetUp = 0.15) {
   const ndcX = screenX * 2 - 1;
   const ndcY = -(screenY * 2 - 1);
 
-  // Perspective frustum dimensions at z=0 plane (distance = camera.position.z = 2)
+  // Perspective frustum dimensions at z=0 plane
   const fovRad = (camera.fov * Math.PI) / 180;
   const halfHeight = Math.tan(fovRad / 2) * camera.position.z;
   const halfWidth = halfHeight * camera.aspect;
@@ -282,6 +289,45 @@ function palmToWorld(pt, offsetUp = 0.15) {
   const worldZ = pt.z ? -pt.z * 1.5 : 0;
 
   return { x: worldX, y: worldY, z: worldZ };
+}
+
+// ── Synthetic Demo Landmarks Generator ──
+
+function generateDemoLandmarks(pt, gesture) {
+  const lm = [];
+  const cx = 1 - pt.x; // Un-mirror for mapping
+  const cy = pt.y;
+
+  // 0: Wrist
+  lm.push({ x: cx, y: cy + 0.12, z: 0 });
+
+  // Finger configs: [baseOffsetX, tipOffsetY, curlFactor]
+  const fingers = [
+    { base: [-0.06, 0.04], tip: [-0.10, -0.04], curl: gesture === 'fist' ? 0.35 : 1.0 }, // Thumb
+    { base: [-0.03, -0.01], tip: [-0.04, -0.12], curl: gesture === 'fist' ? 0.25 : 1.0 }, // Index
+    { base: [0.00, -0.02], tip: [0.00, -0.14], curl: gesture === 'fist' ? 0.22 : 1.0 },  // Middle
+    { base: [0.03, -0.01], tip: [0.03, -0.12], curl: gesture === 'fist' ? 0.25 : 1.0 },  // Ring
+    { base: [0.05, 0.02], tip: [0.07, -0.09], curl: gesture === 'fist' ? 0.30 : 1.0 },   // Pinky
+  ];
+
+  if (gesture === 'pinch') {
+    fingers[0].tip = [-0.02, -0.04];
+    fingers[1].tip = [-0.02, -0.04];
+  }
+
+  for (let f = 0; f < 5; f++) {
+    const { base, tip, curl } = fingers[f];
+    for (let j = 1; j <= 4; j++) {
+      const t = (j / 4) * curl;
+      lm.push({
+        x: cx + base[0] + (tip[0] - base[0]) * t,
+        y: cy + base[1] + (tip[1] - base[1]) * t,
+        z: 0,
+      });
+    }
+  }
+
+  return lm;
 }
 
 // ── Animation Loop ──
@@ -294,8 +340,11 @@ function animate(now) {
 
   const settings = getSettings();
   let currentSpeed = 0;
+  let activeHandVel = { x: 0, y: 0 };
+  let orbPos = { x: 0, y: 0, z: 0 };
+  let currentHandScale = 1.0;
 
-  // ── Hand Tracking Mode ──
+  // ── 1. Live Hand Tracking Mode ──
   let hands = null;
   if (running && !demoMode && isCameraReady() && isTrackingReady()) {
     const video = getVideo();
@@ -309,88 +358,97 @@ function animate(now) {
       const primary = hands.find((h) => h.present);
       setGestureDisplay(primary.gesture);
       currentSpeed = primary.speed;
+      activeHandVel = primary.velocity;
+      currentHandScale = primary.handScale || 1.0;
 
-      // Detect charge burst (fist -> open transition)
+      // Charge Burst Detection (Fist -> Open)
       if (prevGesture === 'fist' && primary.gesture === 'open') {
-        const world = palmToWorld(primary.palm);
-        shockwave.trigger(world.x, world.y, world.z, settings.orbSize * 1.4);
-        soundFX.playBurst(1.2);
+        const burstPos = palmToWorld(primary.palm, 0.12 * currentHandScale);
+        shockwave.trigger(burstPos.x, burstPos.y, burstPos.z, settings.orbSize * currentHandScale * 1.5);
+        soundFX.playBurst(1.3);
       }
       prevGesture = primary.gesture;
 
-      // Two-Hand Mega Orb
+      // Two-Hand Mode
       if (isTwoHandOpen(hands)) {
         const mid = twoHandMidpoint(hands);
         const dist = twoHandDistance(hands);
-        const world = palmToWorld(mid, 0.1);
-        const megaScale = Math.min(Math.max(dist * 4.5, 0.8), 3.2) * settings.orbSize;
+        orbPos = palmToWorld(mid, 0.08 * currentHandScale);
+        const megaScale = Math.min(Math.max(dist * 4.2, 0.7), 2.8) * settings.orbSize * currentHandScale;
 
         orb.show();
         orb.setScale(megaScale);
         orb.setCharge(0.4);
-        orb.setPosition(world.x, world.y, world.z);
-        particles.setPosition(world.x, world.y, world.z);
-        smoke.setPosition(world.x, world.y, world.z);
-        arcs.setPosition(world.x, world.y, world.z);
+        orb.setPosition(orbPos.x, orbPos.y, orbPos.z);
+        particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
+        arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
+
+        if (settings.filamentsEnabled) {
+          orangeFilaments.show();
+          orangeFilaments.update(dt, primary.landmarks, (lm) => palmToWorld(lm, 0), currentHandScale);
+        } else {
+          orangeFilaments.hide();
+        }
       } else {
         // Single Hand Interaction
-        const world = palmToWorld(primary.palm, 0.18);
+        // Position orb floating just above the center of the open palm
+        const offsetAbovePalm = 0.14 * currentHandScale;
+        orbPos = palmToWorld(primary.palm, offsetAbovePalm);
 
         if (primary.gesture === 'open') {
           orb.show();
-          orb.setCharge(0);
-          orb.setScale(settings.orbSize);
+          orb.setCharge(0.0);
+          orb.setScale(settings.orbSize * currentHandScale);
         } else if (primary.gesture === 'fist') {
           orb.show();
           orb.setCharge(1.0);
-          orb.setScale(settings.orbSize * 0.55);
+          orb.setScale(settings.orbSize * currentHandScale * 0.55);
         } else if (primary.gesture === 'pinch') {
           orb.show();
           orb.setCharge(0.3);
           const pinchScale = Math.min(Math.max(primary.pinchDist * 2.8, 0.3), 2.5);
-          orb.setScale(settings.orbSize * pinchScale);
+          orb.setScale(settings.orbSize * currentHandScale * pinchScale);
         } else {
           orb.hide();
         }
 
-        orb.setPosition(world.x, world.y, world.z);
-        particles.setPosition(world.x, world.y, world.z);
-        smoke.setPosition(world.x, world.y, world.z);
-        arcs.setPosition(world.x, world.y, world.z);
+        orb.setPosition(orbPos.x, orbPos.y, orbPos.z);
+        particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
+        arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
 
-        smoke.update(
-          dt,
-          orb.currentIntensity,
-          settings.smokeEnabled ? settings.smokeDensity : 0,
-          primary.speed,
-          orb.charge
-        );
+        // Orange Energy Filaments wrapping around fingers & palm
+        if (settings.filamentsEnabled) {
+          orangeFilaments.show();
+          orangeFilaments.update(dt, primary.landmarks, (lm) => palmToWorld(lm, 0), currentHandScale);
+        } else {
+          orangeFilaments.hide();
+        }
       }
 
-      // Hand skeleton visualization
-      handSkeleton.enabled = settings.skeletonEnabled;
-      handSkeleton.update(
-        primary.landmarks,
-        (lm) => palmToWorld(lm, 0),
-        orb.currentIntensity > 0.05,
-        settings.energy
-      );
+      // Hand skeleton joint lines
+      if (settings.skeletonEnabled) {
+        handSkeleton.update(primary.landmarks, (lm) => palmToWorld(lm, 0), orb.currentIntensity > 0.05, settings.energy);
+      } else {
+        handSkeleton.update(null, null, false);
+      }
     } else {
       setGestureDisplay('none');
       orb.hide();
+      orangeFilaments.hide();
       handSkeleton.update(null, null, false);
       prevGesture = 'none';
     }
   }
 
-  // ── Demo Mode (Mouse Simulation) ──
+  // ── 2. Demo Mode (Mouse Simulation) ──
   if (demoMode) {
-    const world = palmToWorld(mousePos, 0.15);
+    currentHandScale = 1.0;
     const activeGesture = DEMO_GESTURES[demoGestureIndex];
+    orbPos = palmToWorld(mousePos, 0.14);
 
     if (activeGesture === 'open') {
       orb.show();
-      orb.setCharge(0);
+      orb.setCharge(0.0);
       orb.setScale(settings.orbSize);
     } else if (activeGesture === 'fist') {
       orb.show();
@@ -399,43 +457,43 @@ function animate(now) {
     } else if (activeGesture === 'pinch') {
       orb.show();
       orb.setCharge(0.3);
-      orb.setScale(settings.orbSize * 0.4);
+      orb.setScale(settings.orbSize * 0.45);
     }
 
-    orb.setPosition(world.x, world.y, world.z);
-    particles.setPosition(world.x, world.y, world.z);
-    smoke.setPosition(world.x, world.y, world.z);
-    arcs.setPosition(world.x, world.y, world.z);
+    orb.setPosition(orbPos.x, orbPos.y, orbPos.z);
+    particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
+    arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
 
-    smoke.update(
-      dt,
-      orb.currentIntensity,
-      settings.smokeEnabled ? settings.smokeDensity : 0,
-      0.15,
-      orb.charge
-    );
-    handSkeleton.update(null, null, false);
-  }
+    // Generate virtual hand landmarks for Demo Mode so orange filaments wrap around fingers
+    const demoLandmarks = generateDemoLandmarks(mousePos, activeGesture);
+    if (settings.filamentsEnabled) {
+      orangeFilaments.show();
+      orangeFilaments.update(dt, demoLandmarks, (lm) => palmToWorld(lm, 0), 1.0);
+    } else {
+      orangeFilaments.hide();
+    }
 
-  // Update smoke if hands lost or two-hand mode
-  if (!demoMode && hands) {
-    const anyPresent = hands.some((h) => h.present);
-    if (!anyPresent) {
-      smoke.update(dt, 0, settings.smokeEnabled ? settings.smokeDensity : 0, 0, 0);
-    } else if (isTwoHandOpen(hands)) {
-      const primary = hands.find((h) => h.present);
-      smoke.update(
-        dt,
-        orb.currentIntensity,
-        settings.smokeEnabled ? settings.smokeDensity : 0,
-        primary ? primary.speed : 0,
-        orb.charge
-      );
+    if (settings.skeletonEnabled) {
+      handSkeleton.update(demoLandmarks, (lm) => palmToWorld(lm, 0), orb.currentIntensity > 0.05, settings.energy);
+    } else {
+      handSkeleton.update(null, null, false);
     }
   }
 
-  // ── Update 3D Components ──
-  orb.update(dt, settings.energy);
+  // ── 3. Smoke Simulation (Local Curling Wisps & Expanding Scene Waves) ──
+  smoke.update(
+    dt,
+    orbPos,
+    orb.currentIntensity,
+    settings.smokeEnabled ? settings.smokeDensity : 0,
+    currentSpeed,
+    activeHandVel,
+    orb.charge,
+    currentHandScale
+  );
+
+  // ── 4. Update 3D Components ──
+  orb.update(dt, settings.energy, camera);
   particles.update(
     dt,
     performance.now() / 1000,
@@ -445,16 +503,18 @@ function animate(now) {
   arcs.update(dt, settings.arcsEnabled ? orb.currentIntensity : 0);
   shockwave.update(dt);
 
-  // Audio synthesis sync
+  // ── 5. Audio Synthesis ──
   soundFX.update(orb.currentIntensity * settings.energy, orb.charge, currentSpeed);
 
-  // Bloom post-processing
+  // ── 6. Bloom Post-Processing ──
   if (bloomPass) {
     bloomPass.enabled = settings.bloomEnabled;
-    bloomPass.strength = 1.25 * settings.energy;
+    bloomPass.strength = 1.35 * settings.energy;
+    bloomPass.radius = 0.45;
+    bloomPass.threshold = 0.18;
   }
 
-  // ── Render ──
+  // ── 7. Render Pass ──
   renderer.clear();
   composer.render(dt);
 }

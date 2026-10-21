@@ -171,6 +171,9 @@ export function processGestures(results, dt) {
       state.present = true;
       state.lostFrames = 0;
 
+      const palmSpan = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+      const handScale = Math.min(Math.max(palmSpan / 0.18, 0.45), 2.2);
+
       output.push({
         index: i,
         present: true,
@@ -180,6 +183,8 @@ export function processGestures(results, dt) {
         gesture: state.gestureSmoothed,
         openness: open,
         pinchDist: pinch,
+        palmSpan,
+        handScale,
         landmarks: lm,
       });
     } else {
