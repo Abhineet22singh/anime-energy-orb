@@ -3,213 +3,205 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Anime Energy Studio — Real-Time AI AR VFX</title>
-  <link rel="stylesheet" href="/src/style.css" />
+  <title>Anime Energy Orb — Webcam AR</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #020611;
+      font-family: 'Rajdhani', sans-serif;
+      color: #e2e8f0;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ── Splash / Loading Screen ── */
+    #splash {
+      position: fixed; inset: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, #07152d 0%, #020713 70%, #000208 100%);
+      flex-direction: column; gap: 24px;
+    }
+
+    #splash h1 {
+      font-family: 'Orbitron', monospace;
+      font-size: 28px; font-weight: 900; letter-spacing: 6px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8, #38bdf8);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    #splash p {
+      font-size: 13px; letter-spacing: 3px; color: #64748b;
+      font-family: 'Orbitron', monospace;
+    }
+
+    .loader {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 22px; border-radius: 24px;
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(56,189,248,0.2);
+    }
+    .loader .spin {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(56,189,248,0.2);
+      border-top-color: #38bdf8; border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    .loader span {
+      font-family: 'Orbitron', monospace; font-size: 11px;
+      letter-spacing: 2px; color: #94a3b8;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #btn-start {
+      padding: 16px 48px; border-radius: 36px;
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      border: 1px solid rgba(56,189,248,0.6);
+      color: #fff; font-family: 'Orbitron', monospace;
+      font-size: 14px; font-weight: 700; letter-spacing: 3px;
+      cursor: pointer; transition: all .3s ease;
+    }
+    #btn-start:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 30px rgba(56,189,248,0.5);
+    }
+
+    .instructions {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 6px; margin-top: 12px;
+    }
+    .instructions span {
+      font-size: 13px; color: #475569; letter-spacing: 1.5px;
+    }
+
+    /* ── Main AR View ── */
+    #app { position: fixed; inset: 0; background: #000; }
+
+    #camera-feed {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 0; background: #020617;
+    }
+
+    #three-canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      z-index: 1; pointer-events: none;
+    }
+
+    /* ── Minimal HUD ── */
+    #hud {
+      position: absolute; top: 16px; left: 50%;
+      transform: translateX(-50%); z-index: 10;
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    .badge {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 16px; border-radius: 20px;
+      background: rgba(15,23,42,0.75);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(12px);
+      font-family: 'Orbitron', monospace;
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      transition: all .25s ease;
+    }
+
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px #22c55e;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; } 50% { opacity: .4; }
+    }
+
+    #gesture-badge {
+      border-color: rgba(56,189,248,0.5);
+      color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56,189,248,0.2);
+    }
+    #gesture-badge.fist {
+      border-color: rgba(249,115,22,0.6);
+      color: #fb923c;
+      box-shadow: 0 0 12px rgba(249,115,22,0.3);
+    }
+    #gesture-badge.pinch {
+      border-color: rgba(234,179,8,0.6);
+      color: #facc15;
+      box-shadow: 0 0 12px rgba(234,179,8,0.3);
+    }
+
+    /* ── Hint Overlay ── */
+    #hint {
+      position: absolute; bottom: 36px; left: 50%;
+      transform: translateX(-50%); z-index: 10;
+      padding: 10px 28px; border-radius: 24px;
+      background: rgba(15,23,42,0.8);
+      border: 1px solid rgba(56,189,248,0.2);
+      backdrop-filter: blur(12px);
+      font-size: 14px; font-weight: 600; color: #94a3b8;
+      transition: opacity .6s ease;
+    }
+    #hint.fade { opacity: 0; pointer-events: none; }
+
+    /* ── Screenshot Button ── */
+    #btn-capture {
+      position: absolute; bottom: 36px; right: 24px; z-index: 10;
+      width: 48px; height: 48px; border-radius: 50%;
+      background: rgba(15,23,42,0.75);
+      border: 2px solid rgba(255,255,255,0.2);
+      color: #cbd5e1; font-size: 20px;
+      cursor: pointer; display: flex; align-items: center;
+      justify-content: center; backdrop-filter: blur(12px);
+      transition: all .2s ease;
+    }
+    #btn-capture:hover {
+      border-color: #38bdf8;
+      box-shadow: 0 0 16px rgba(56,189,248,0.3);
+      transform: scale(1.1);
+    }
+  </style>
 </head>
 <body>
-  <!-- Cinematic Entry Portal / Splash Screen -->
-  <div id="portal-screen">
-    <div class="portal-container">
-      <div class="energy-sigil">
-        <div class="sigil-core"></div>
-        <div class="sigil-ring ring-1"></div>
-        <div class="sigil-ring ring-2"></div>
-        <div class="sigil-ring ring-3"></div>
-      </div>
-      <h1 class="portal-title">ANIME ENERGY STUDIO</h1>
-      <p class="portal-tagline">REAL-TIME AI FACE TRANSFORMATION & AR ENERGY VFX</p>
-      
-      <div id="loader-status" class="portal-status">
-        <div class="status-spinner"></div>
-        <span class="status-msg">INITIALIZING VISION AI…</span>
-      </div>
-
-      <button id="btn-enter" class="summon-btn hidden">
-        <span class="btn-glow"></span>
-        <span class="btn-text">⚡ ENTER STUDIO</span>
-      </button>
-
-      <div class="portal-instructions">
-        <span>📸 FRAME FACE & RAISED HAND IN VIEW</span>
-        <span>🖐 OPEN PALM • SUMMON ENERGY ORB</span>
-        <span>☝️ INDEX FINGER • DRAW GLOWING SHAPES</span>
-        <span>🌬️ OPEN MOUTH • EXHALE BLUE MIST</span>
-        <span>✊ CLOSED FIST • CHARGE ENERGY</span>
-        <span>🤏 PINCH • SCALE ORB SIZE</span>
-      </div>
+  <!-- Splash -->
+  <div id="splash">
+    <h1>ANIME ENERGY ORB</h1>
+    <p>REAL-TIME WEBCAM AR</p>
+    <div id="loader" class="loader">
+      <div class="spin"></div>
+      <span id="status-msg">LOADING AI VISION…</span>
+    </div>
+    <button id="btn-start" class="hidden">⚡ START</button>
+    <div class="instructions">
+      <span>🖐 OPEN PALM — SUMMON ORB</span>
+      <span>✊ FIST — CHARGE</span>
+      <span>🤏 PINCH — RESIZE</span>
     </div>
   </div>
 
-  <!-- Main AR Application View -->
+  <!-- AR View -->
   <div id="app" class="hidden">
-    <!-- Camera Feed & GPU Render Canvases -->
     <video id="camera-feed" autoplay playsinline muted></video>
-    <canvas id="anime-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <!-- Top Futuristic Glass HUD -->
-    <header id="top-bar">
-      <div class="hud-left">
-        <div class="live-badge">
-          <span class="live-dot"></span>
-          <span class="live-text">AR ACTIVE</span>
-        </div>
-        <div id="gesture-pill" class="gesture-pill">
-          <span id="gesture-icon">🖐</span>
-          <span id="gesture-label">OPEN PALM</span>
-        </div>
+    <div id="hud">
+      <div class="badge"><div class="live-dot"></div><span>LIVE</span></div>
+      <div id="gesture-badge" class="badge">
+        <span id="gesture-icon">🖐</span>
+        <span id="gesture-label">SEARCHING…</span>
       </div>
-
-      <div class="hud-center">
-        <span class="app-branding">KI ENERGY // AI STUDIO</span>
-      </div>
-
-      <div class="hud-right">
-        <button id="btn-record" class="hud-btn rec-btn" title="Record HD Video">
-          <span class="rec-dot"></span>
-          <span id="rec-label">REC</span>
-        </button>
-        <button id="btn-airdraw-toggle" class="hud-btn active" title="Toggle Air Drawing Mode">✍️</button>
-        <button id="btn-sound" class="hud-btn" title="Toggle Audio (M)">🔊</button>
-        <button id="btn-screenshot" class="hud-btn" title="Capture AR Photo">📸</button>
-        <button id="btn-panel-toggle" class="hud-btn" title="VFX Settings">⚙️</button>
-        <button id="btn-fullscreen" class="hud-btn" title="Toggle Fullscreen (F)">⛶</button>
-      </div>
-    </header>
-
-    <!-- Centered Floating Framing & Interaction Hint -->
-    <div id="onboarding-hint" class="onboarding-hint">
-      <div class="hint-pulse"></div>
-      <span id="hint-text">Position both your face and raised hand in frame</span>
     </div>
 
-    <!-- Side VFX Glass Control Drawer -->
-    <aside id="side-panel" class="collapsed">
-      <div class="panel-header">
-        <h3>AI VFX STUDIO</h3>
-        <button id="btn-panel-close" class="close-btn">✕</button>
-      </div>
-
-      <div class="panel-scroll">
-        <!-- Anime Style Selector -->
-        <div class="control-section">
-          <h4>ANIME TRANSFORMATION</h4>
-          <div class="style-selector-grid">
-            <button class="style-btn active" data-style="1">SHONEN</button>
-            <button class="style-btn" data-style="2">CYBERPUNK</button>
-            <button class="style-btn" data-style="3">GHIBLI</button>
-            <button class="style-btn" data-style="4">MANGA</button>
-            <button class="style-btn" data-style="0">NATURAL</button>
-          </div>
-          <div class="slider-group" style="margin-top: 14px;">
-            <div class="slider-header">
-              <span>Filter Intensity</span>
-              <span id="val-anime-intensity" class="val-badge">1.0x</span>
-            </div>
-            <input type="range" id="slider-anime-intensity" min="0.0" max="1.0" step="0.05" value="1.0">
-          </div>
-        </div>
-
-        <!-- Air Drawing Controls -->
-        <div class="control-section">
-          <h4>AIR DRAWING & FINGER TRAILS</h4>
-          <label class="switch-row">
-            <span>Air-Draw 3D Shapes</span>
-            <input type="checkbox" id="toggle-airdraw" checked>
-          </label>
-          <button id="btn-clear-drawing" class="action-btn-small" style="margin-top: 8px;">🗑 CLEAR AIR DRAWINGS</button>
-        </div>
-
-        <div class="control-section">
-          <h4>ENERGY DYNAMICS</h4>
-          <div class="slider-group">
-            <div class="slider-header">
-              <span>Orb Scale</span>
-              <span id="val-orb-size" class="val-badge">1.0x</span>
-            </div>
-            <input type="range" id="slider-orb-size" min="0.4" max="2.5" step="0.05" value="1.0">
-          </div>
-
-          <div class="slider-group">
-            <div class="slider-header">
-              <span>Power Intensity</span>
-              <span id="val-energy" class="val-badge">1.0x</span>
-            </div>
-            <input type="range" id="slider-energy" min="0.2" max="2.5" step="0.05" value="1.0">
-          </div>
-
-          <div class="slider-group">
-            <div class="slider-header">
-              <span>Smoke & Aura Waves</span>
-              <span id="val-smoke" class="val-badge">1.0x</span>
-            </div>
-            <input type="range" id="slider-smoke" min="0.0" max="2.0" step="0.1" value="1.0">
-          </div>
-
-          <div class="slider-group">
-            <div class="slider-header">
-              <span>Sparks & Particles</span>
-              <span id="val-particles" class="val-badge">1.0x</span>
-            </div>
-            <input type="range" id="slider-particles" min="0.0" max="2.0" step="0.1" value="1.0">
-          </div>
-        </div>
-
-        <div class="control-section">
-          <h4>VFX LAYERS</h4>
-          <label class="switch-row">
-            <span>Anime Face Stylization</span>
-            <input type="checkbox" id="toggle-anime-filter" checked>
-          </label>
-          <label class="switch-row">
-            <span>Mouth Breath Mist</span>
-            <input type="checkbox" id="toggle-mouth-smoke" checked>
-          </label>
-          <label class="switch-row">
-            <span>Orange Finger Filaments</span>
-            <input type="checkbox" id="toggle-filaments" checked>
-          </label>
-          <label class="switch-row">
-            <span>Cinematic Bloom</span>
-            <input type="checkbox" id="toggle-bloom" checked>
-          </label>
-          <label class="switch-row">
-            <span>Expanding Energy Waves</span>
-            <input type="checkbox" id="toggle-smoke" checked>
-          </label>
-          <label class="switch-row">
-            <span>Hand Energy Streams</span>
-            <input type="checkbox" id="toggle-skeleton" checked>
-          </label>
-          <label class="switch-row">
-            <span>Electrical Arcs</span>
-            <input type="checkbox" id="toggle-arcs" checked>
-          </label>
-          <label class="switch-row">
-            <span>Escaping Particles</span>
-            <input type="checkbox" id="toggle-particles" checked>
-          </label>
-        </div>
-
-        <div class="control-section hotkeys-section">
-          <h4>KEYBOARD SHORTCUTS</h4>
-          <p><kbd>Space</kbd> Reset / Recalibrate</p>
-          <p><kbd>M</kbd> Mute / Unmute Audio</p>
-          <p><kbd>R</kbd> Toggle Video Recording</p>
-          <p><kbd>D</kbd> Toggle Air Drawing</p>
-          <p><kbd>C</kbd> Clear Air Drawing</p>
-          <p><kbd>F</kbd> Toggle Fullscreen</p>
-          <p><kbd>Scroll</kbd> Quick Orb Scale</p>
-        </div>
-
-        <div class="panel-footer">
-          <button id="btn-reset" class="action-btn">↺ RECALIBRATE</button>
-        </div>
-      </div>
-    </aside>
+    <div id="hint">Raise your open hand in front of the camera</div>
+    <button id="btn-capture" title="Screenshot">📸</button>
   </div>
 
   <script type="module" src="/src/main.js"></script>
