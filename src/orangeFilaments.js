@@ -3,7 +3,7 @@
  *
  * Implements Catmull-Rom splines derived from hand landmarks with animated
  * spiral offsets, bright white-orange cores, soft golden glow, subtle flickering,
- * and escaping amber sparks.
+ * knuckle webbing arches, and escaping amber sparks.
  */
 
 import * as THREE from 'three';
@@ -15,6 +15,14 @@ const FINGER_CHAINS = [
   [0, 9, 10, 11, 12],    // Middle
   [0, 13, 14, 15, 16],   // Ring
   [0, 17, 18, 19, 20],   // Pinky
+];
+
+// Webbing arches between adjacent knuckle bases
+const WEBBING_PAIRS = [
+  [2, 5],   // Thumb to Index base
+  [5, 9],   // Index to Middle base
+  [9, 13],  // Middle to Ring base
+  [13, 17], // Ring to Pinky base
 ];
 
 // Palm perimeter loop
@@ -33,6 +41,7 @@ export class OrangeFilaments {
     this.visible = false;
 
     this._createStrands();
+    this._createWebbing();
     this._createSparks();
   }
 
@@ -51,8 +60,8 @@ export class OrangeFilaments {
           const t = i / (POINTS_PER_FINGER - 1);
           // Root is deep amber, mid is bright hot orange/white, tip is intense orange
           const r = 1.0;
-          const g = THREE.MathUtils.lerp(0.35, 0.9, Math.sin(t * Math.PI));
-          const b = THREE.MathUtils.lerp(0.05, 0.45, Math.sin(t * Math.PI));
+          const g = THREE.MathUtils.lerp(0.38, 0.92, Math.sin(t * Math.PI));
+          const b = THREE.MathUtils.lerp(0.06, 0.48, Math.sin(t * Math.PI));
           coreColors[i * 3] = r;
           coreColors[i * 3 + 1] = g;
           coreColors[i * 3 + 2] = b;
@@ -78,7 +87,7 @@ export class OrangeFilaments {
         auraGeo.setAttribute('position', new THREE.BufferAttribute(auraPositions, 3));
 
         const auraMat = new THREE.LineBasicMaterial({
-          color: new THREE.Color(1.0, 0.45, 0.05),
+          color: new THREE.Color(1.0, 0.48, 0.06),
           transparent: true,
           opacity: 0,
           blending: THREE.AdditiveBlending,
@@ -98,8 +107,8 @@ export class OrangeFilaments {
           auraGeo,
           auraMat,
           phase: s * Math.PI + f * 0.8,
-          speed: 4.0 + f * 0.5,
-          radius: 0.012 + s * 0.008,
+          speed: 4.2 + f * 0.5,
+          radius: 0.009 + s * 0.006, // Tightly hugs the finger skin
         });
       }
     }
@@ -124,6 +133,32 @@ export class OrangeFilaments {
     }
   }
 
+  _createWebbing() {
+    this.webbingStrands = [];
+    for (let w = 0; w < WEBBING_PAIRS.length; w++) {
+      const geo = new THREE.BufferGeometry();
+      const positions = new Float32Array(16 * 3);
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      const mat = new THREE.LineBasicMaterial({
+        color: new THREE.Color(1.0, 0.6, 0.12),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+      });
+
+      const line = new THREE.Line(geo, mat);
+      this.group.add(line);
+      this.webbingStrands.push({
+        line,
+        geo,
+        mat,
+        pair: WEBBING_PAIRS[w],
+        phase: w * 1.2,
+      });
+    }
+  }
+
   _createSparks() {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(SPARK_COUNT * 3);
@@ -145,16 +180,15 @@ export class OrangeFilaments {
       sizes[i] = Math.random() * 4 + 2;
       lives[i] = Math.random();
 
-      vels[i * 3] = (Math.random() - 0.5) * 0.06;
-      vels[i * 3 + 1] = (Math.random() - 0.5) * 0.06;
-      vels[i * 3 + 2] = (Math.random() - 0.5) * 0.06;
+      vels[i * 3] = (Math.random() - 0.5) * 0.05;
+      vels[i * 3 + 1] = (Math.random() - 0.5) * 0.05;
+      vels[i * 3 + 2] = (Math.random() - 0.5) * 0.05;
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-    // Custom point shader for glowing sparks
     const sparkShader = {
       vertexShader: /* glsl */ `
         attribute float size;
@@ -211,17 +245,9 @@ export class OrangeFilaments {
     this.targetIntensity = 0.0;
   }
 
-  /**
-   * Update the orange filaments each frame
-   * @param {number} dt – Delta time in seconds
-   * @param {Array<object>} landmarks – 21 MediaPipe hand landmarks
-   * @param {function} projectFn – Mapping function from landmark to 3D world space
-   * @param {number} scaleMultiplier – Scale based on hand size
-   */
   update(dt, landmarks, projectFn, scaleMultiplier = 1.0) {
     this.time += dt;
 
-    // Smooth intensity fade
     const lerpRate = 1 - Math.pow(0.001, dt);
     this.intensity += (this.targetIntensity - this.intensity) * lerpRate;
 
@@ -231,7 +257,7 @@ export class OrangeFilaments {
     }
     this.group.visible = true;
 
-    // Flicker factor: subtle electrical vibration (0.85 to 1.15)
+    // Flicker factor: subtle electrical vibration (0.88 to 1.12)
     const flicker = 0.88 + 0.12 * Math.sin(this.time * 28.0) * Math.cos(this.time * 19.0);
     const currentAlpha = Math.min(this.intensity * flicker, 1.0);
 
@@ -243,7 +269,6 @@ export class OrangeFilaments {
         const p = projectFn(landmarks[idx]);
         return new THREE.Vector3(p.x, p.y, p.z);
       });
-      // CatmullRomCurve3 with centripetal curve type for smooth organic curvature
       const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5);
       fingerSplines.push(curve);
     }
@@ -255,7 +280,6 @@ export class OrangeFilaments {
       const corePos = strand.coreGeo.attributes.position;
       const auraPos = strand.auraGeo.attributes.position;
 
-      // Opacity
       strand.coreMat.opacity = currentAlpha * 0.95;
       strand.auraMat.opacity = currentAlpha * 0.45;
 
@@ -266,33 +290,26 @@ export class OrangeFilaments {
         const pt = curve.getPoint(u);
         const tangent = curve.getTangent(u);
 
-        // Compute orthogonal frame for spiral offset
         const up = new THREE.Vector3(0, 1, 0);
         let normal = new THREE.Vector3().crossVectors(tangent, up).normalize();
         if (normal.lengthSq() < 0.01) normal = new THREE.Vector3(1, 0, 0);
         const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
 
-        // Spiral wrapping angle: changes along finger length + animated over time
         const angle = u * Math.PI * 4.0 + this.time * strand.speed + strand.phase;
-
-        // Radius expands at knuckles, contracts at tips
-        const knuckleBulge = 1.0 + 0.4 * Math.sin(u * Math.PI * 3.0);
+        const knuckleBulge = 1.0 + 0.35 * Math.sin(u * Math.PI * 3.0);
         const r = baseRadius * knuckleBulge * Math.sin(u * Math.PI * 0.95);
 
-        // Small jitter/noise along the strand for plasma effect
-        const jitterX = Math.sin(u * 20.0 + this.time * 15.0) * 0.002 * scaleMultiplier;
-        const jitterY = Math.cos(u * 20.0 - this.time * 12.0) * 0.002 * scaleMultiplier;
+        const jitterX = Math.sin(u * 20.0 + this.time * 15.0) * 0.0015 * scaleMultiplier;
+        const jitterY = Math.cos(u * 20.0 - this.time * 12.0) * 0.0015 * scaleMultiplier;
 
         const offsetX = normal.x * Math.cos(angle) * r + binormal.x * Math.sin(angle) * r + jitterX;
         const offsetY = normal.y * Math.cos(angle) * r + binormal.y * Math.sin(angle) * r + jitterY;
         const offsetZ = normal.z * Math.cos(angle) * r + binormal.z * Math.sin(angle) * r;
 
-        // Core line
         corePos.array[j * 3] = pt.x + offsetX;
         corePos.array[j * 3 + 1] = pt.y + offsetY;
         corePos.array[j * 3 + 2] = pt.z + offsetZ;
 
-        // Aura line (slightly wider spiral offset)
         auraPos.array[j * 3] = pt.x + offsetX * 1.35;
         auraPos.array[j * 3 + 1] = pt.y + offsetY * 1.35;
         auraPos.array[j * 3 + 2] = pt.z + offsetZ * 1.35;
@@ -302,7 +319,33 @@ export class OrangeFilaments {
       auraPos.needsUpdate = true;
     }
 
-    // 3. Update palm contour strands
+    // 3. Update knuckle webbing arches between adjacent fingers
+    for (let w = 0; w < this.webbingStrands.length; w++) {
+      const strand = this.webbingStrands[w];
+      const [idxA, idxB] = strand.pair;
+      const ptA = projectFn(landmarks[idxA]);
+      const ptB = projectFn(landmarks[idxB]);
+      const pos = strand.geo.attributes.position;
+      strand.mat.opacity = currentAlpha * 0.65;
+
+      for (let j = 0; j < 16; j++) {
+        const u = j / 15;
+        const x = THREE.MathUtils.lerp(ptA.x, ptB.x, u);
+        const y = THREE.MathUtils.lerp(ptA.y, ptB.y, u);
+        const z = THREE.MathUtils.lerp(ptA.z, ptB.z, u);
+
+        // Arch upward between knuckles
+        const arch = Math.sin(u * Math.PI) * 0.008 * scaleMultiplier;
+        const wave = Math.sin(u * Math.PI * 4.0 + this.time * 6.0 + strand.phase) * 0.003 * scaleMultiplier;
+
+        pos.array[j * 3] = x;
+        pos.array[j * 3 + 1] = y + arch + wave;
+        pos.array[j * 3 + 2] = z + wave;
+      }
+      pos.needsUpdate = true;
+    }
+
+    // 4. Update palm contour strands
     const palmPts = PALM_LOOP.map((idx) => {
       const p = projectFn(landmarks[idx]);
       return new THREE.Vector3(p.x, p.y, p.z);
@@ -317,7 +360,7 @@ export class OrangeFilaments {
       for (let j = 0; j < 32; j++) {
         const u = j / 31;
         const pt = palmCurve.getPoint(u);
-        const wave = Math.sin(u * Math.PI * 6.0 + this.time * 5.0 + strand.phase) * 0.005 * scaleMultiplier;
+        const wave = Math.sin(u * Math.PI * 6.0 + this.time * 5.0 + strand.phase) * 0.004 * scaleMultiplier;
         pos.array[j * 3] = pt.x + wave;
         pos.array[j * 3 + 1] = pt.y + wave;
         pos.array[j * 3 + 2] = pt.z + wave;
@@ -325,7 +368,7 @@ export class OrangeFilaments {
       pos.needsUpdate = true;
     }
 
-    // 4. Update Amber Sparks floating around fingers
+    // 5. Update Amber Sparks floating around fingers
     this._updateSparks(dt, fingerSplines, currentAlpha, scaleMultiplier);
   }
 
@@ -337,7 +380,6 @@ export class OrangeFilaments {
     for (let i = 0; i < SPARK_COUNT; i++) {
       lives[i] += dt * 1.5;
 
-      // Respawn spark along a random finger spline
       if (lives[i] >= 1.0) {
         lives[i] = 0;
         const splineIdx = Math.floor(Math.random() * splines.length);
@@ -345,13 +387,13 @@ export class OrangeFilaments {
         const u = 0.2 + Math.random() * 0.75;
         const pt = spline.getPoint(u);
 
-        positions[i * 3] = pt.x + (Math.random() - 0.5) * 0.015 * scaleMultiplier;
-        positions[i * 3 + 1] = pt.y + (Math.random() - 0.5) * 0.015 * scaleMultiplier;
-        positions[i * 3 + 2] = pt.z + (Math.random() - 0.5) * 0.015 * scaleMultiplier;
+        positions[i * 3] = pt.x + (Math.random() - 0.5) * 0.012 * scaleMultiplier;
+        positions[i * 3 + 1] = pt.y + (Math.random() - 0.5) * 0.012 * scaleMultiplier;
+        positions[i * 3 + 2] = pt.z + (Math.random() - 0.5) * 0.012 * scaleMultiplier;
 
-        vels[i * 3] = (Math.random() - 0.5) * 0.04 * scaleMultiplier;
-        vels[i * 3 + 1] = (0.02 + Math.random() * 0.05) * scaleMultiplier;
-        vels[i * 3 + 2] = (Math.random() - 0.5) * 0.04 * scaleMultiplier;
+        vels[i * 3] = (Math.random() - 0.5) * 0.035 * scaleMultiplier;
+        vels[i * 3 + 1] = (0.02 + Math.random() * 0.045) * scaleMultiplier;
+        vels[i * 3 + 2] = (Math.random() - 0.5) * 0.035 * scaleMultiplier;
       } else {
         positions[i * 3] += vels[i * 3] * dt;
         positions[i * 3 + 1] += vels[i * 3 + 1] * dt;
@@ -368,6 +410,10 @@ export class OrangeFilaments {
       strand.coreMat.dispose();
       strand.auraGeo.dispose();
       strand.auraMat.dispose();
+    }
+    for (const w of this.webbingStrands) {
+      w.geo.dispose();
+      w.mat.dispose();
     }
     for (const p of this.palmStrands) {
       p.geo.dispose();

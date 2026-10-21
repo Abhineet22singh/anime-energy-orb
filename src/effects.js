@@ -8,7 +8,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 
-// ── Color grading shader ──
+// ── Transparent VFX Enhance Shader (Guarantees zero interference with live camera feed) ──
 const ColorGradeShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -28,18 +28,13 @@ const ColorGradeShader = {
 
     void main() {
       vec4 col = texture2D(tDiffuse, vUv);
+      // Strictly discard empty background pixels so the live webcam video & face stay crystal clear
+      if (col.a <= 0.002) {
+        discard;
+      }
 
-      // Slight blue tint
-      col.rgb += vec3(-0.01, 0.0, 0.03) * uIntensity;
-
-      // Vignette
-      vec2 vig = vUv * (1.0 - vUv);
-      float vigAmount = pow(vig.x * vig.y * 15.0, 0.25);
-      col.rgb *= mix(0.7, 1.0, vigAmount);
-
-      // Slight contrast boost
-      col.rgb = mix(vec3(0.5), col.rgb, 1.0 + uIntensity * 0.3);
-
+      // Subtle vibrance boost on energy pixels only
+      col.rgb += vec3(0.0, 0.02, 0.05) * col.a * uIntensity;
       gl_FragColor = col;
     }
   `,

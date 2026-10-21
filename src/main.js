@@ -1,10 +1,17 @@
 /**
  * main.js – Complete Production Anime Energy Orb AR Application
+ *
+ * Full Face + Hand Energy + Translucent Blue Smoke Composite:
+ * - Real live webcam background showing user's actual face, head, hair, body, and hand
+ * - Luminous blue-white energy orb floating above the tracked palm
+ * - Animated orange and amber energy strands wrapping around the real fingers and palm
+ * - Translucent blue smoke curling from palm across upper body towards face with eye clarity protection
+ * - Composite HD selfie photo capture (webcam + VFX combined)
  */
 
 import * as THREE from 'three';
 import { startCamera, stopCamera, isCameraReady, getVideo } from './camera.js';
-import { initHandTracking, detectHands, isTrackingReady } from './handTracking.js';
+import { initVisionTracking, detectVision, isTrackingReady, hasFaceTracking } from './handTracking.js';
 import { processGestures, isTwoHandOpen, twoHandMidpoint, twoHandDistance } from './gestures.js';
 import { EnergyOrb } from './orb.js';
 import { OrangeFilaments } from './orangeFilaments.js';
@@ -39,7 +46,7 @@ async function init() {
     onSoundToggle: () => soundFX.toggle(),
   });
 
-  // 1. Three.js High-Performance Setup
+  // 1. Three.js High-Performance Setup with alpha transparency for live camera compositing
   const canvas = document.getElementById('three-canvas');
   renderer = new THREE.WebGLRenderer({
     canvas,
@@ -49,7 +56,7 @@ async function init() {
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0x000000, 0);
+  renderer.setClearColor(0x000000, 0); // 100% transparent background
   renderer.autoClear = false;
 
   scene = new THREE.Scene();
@@ -81,22 +88,22 @@ async function init() {
   handSkeleton = new HandSkeleton();
   scene.add(handSkeleton.group);
 
-  // 3. Post-Processing Pipeline (Bloom + Color Grade)
+  // 3. Post-Processing Pipeline (Transparent Bloom Pass)
   const pp = createPostProcessing(renderer, scene, camera, window.innerWidth, window.innerHeight);
   composer = pp.composer;
   bloomPass = pp.bloomPass;
 
-  // 4. Setup Composite Mirror Screenshot (Video + WebGL)
+  // 4. Setup Composite Mirror Screenshot (Webcam Video + Three.js VFX)
   setupCompositeScreenshot(renderer);
 
   // 5. Global Resize & Interaction Listeners
   window.addEventListener('resize', onResize);
   setupInteractionEvents();
 
-  // 6. Preload Vision AI Model
+  // 6. Preload Vision AI (Dual Hand + Face Tracking)
   setStatusText('INITIALIZING AI VISION…');
   try {
-    await initHandTracking((msg) => setStatusText(msg.toUpperCase()));
+    await initVisionTracking((msg) => setStatusText(msg.toUpperCase()));
     setModelReady();
   } catch (err) {
     console.warn('Vision model init error, defaulting to interactive mode:', err);
@@ -316,14 +323,24 @@ function animate(now) {
   let activeHandVel = { x: 0, y: 0 };
   let orbPos = { x: 0, y: 0, z: 0 };
   let currentHandScale = 1.0;
+  let faceData = null;
 
-  // ── 1. Live Hand Tracking Mode ──
+  // ── 1. Live Hand & Face Tracking Mode ──
   let hands = null;
   if (running && !interactiveMode && isCameraReady() && isTrackingReady()) {
     const video = getVideo();
-    const results = detectHands(video, now);
-    hands = processGestures(results, dt);
+    const vision = detectVision(video, now);
 
+    // Extract Face Data (Eyes & Nose Tip) for face-aware smoke curling and eye clarity
+    if (vision.face && vision.face.faceLandmarks && vision.face.faceLandmarks.length > 0) {
+      const flm = vision.face.faceLandmarks[0];
+      const leftEye = palmToWorld(flm[33], 0);
+      const rightEye = palmToWorld(flm[263], 0);
+      const noseTip = palmToWorld(flm[4], 0);
+      faceData = { leftEye, rightEye, faceCenter: noseTip };
+    }
+
+    hands = processGestures(vision.hands, dt);
     const anyPresent = hands.some((h) => h.present);
 
     if (anyPresent) {
@@ -388,6 +405,7 @@ function animate(now) {
         particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
         arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
 
+        // Orange Energy Filaments wrapping directly around the real fingers & palm
         if (settings.filamentsEnabled) {
           orangeFilaments.show();
           orangeFilaments.update(dt, primary.landmarks, (lm) => palmToWorld(lm, 0), currentHandScale);
@@ -449,7 +467,7 @@ function animate(now) {
     }
   }
 
-  // ── 3. Smoke & Expanding Energy Waves ──
+  // ── 3. Translucent Blue Smoke & Face-Aware Energy Waves ──
   smoke.update(
     dt,
     orbPos,
@@ -458,7 +476,8 @@ function animate(now) {
     currentSpeed,
     activeHandVel,
     orb.charge,
-    currentHandScale
+    currentHandScale,
+    faceData // Coordinates for face trajectory & eye clarity masking
   );
 
   // ── 4. Visual Effect Updates ──
@@ -475,7 +494,7 @@ function animate(now) {
   // ── 5. Audio Synthesis Sync ──
   soundFX.update(orb.currentIntensity * settings.energy, orb.charge, currentSpeed);
 
-  // ── 6. Bloom Post-Processing ──
+  // ── 6. Bloom Post-Processing (Composited over transparent live video) ──
   if (bloomPass) {
     bloomPass.enabled = settings.bloomEnabled;
     bloomPass.strength = 1.35 * settings.energy;

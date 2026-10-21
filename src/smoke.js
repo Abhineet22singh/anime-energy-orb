@@ -4,14 +4,15 @@
  * Implements:
  * 1. Wispy, semi-transparent blue-white smoke curling around orb and hand
  * 2. Large expanding energy waves that drift across the scene with delicate transparency
- * 3. Motion trails responding to hand speed and velocity
- * 4. Procedural GPU noise distortion for organic, irregular non-circular shapes
+ * 3. Face-aware trajectory and eye-clarity masking so the user's face and eyes remain recognizable
+ * 4. Motion trails responding to hand speed and velocity
+ * 5. Procedural GPU noise distortion for organic, irregular non-circular shapes
  */
 
 import * as THREE from 'three';
 
 const LOCAL_SMOKE_COUNT = 160;
-const EXPANDING_WAVE_COUNT = 70;
+const EXPANDING_WAVE_COUNT = 80;
 
 // ── Organic Smoke Vertex Shader ──
 const smokeVertexShader = /* glsl */ `
@@ -27,6 +28,7 @@ const smokeVertexShader = /* glsl */ `
   varying float vRotation;
   varying float vAlpha;
   varying float vType;
+  varying vec3 vWorldPos;
 
   void main() {
     float age = uTime - aBirth;
@@ -48,12 +50,13 @@ const smokeVertexShader = /* glsl */ `
 
     // Position trajectory: velocity + upward thermal convection + subtle curl turbulence
     vec3 curl = vec3(
-      sin(age * 3.5 + aRotation) * 0.02,
-      age * (aType > 0.5 ? 0.08 : 0.14),
-      cos(age * 3.5 + aRotation) * 0.02
+      sin(age * 3.5 + aRotation) * 0.025,
+      age * (aType > 0.5 ? 0.09 : 0.15),
+      cos(age * 3.5 + aRotation) * 0.025
     );
 
     vec3 pos = position + aVelocity * age + curl;
+    vWorldPos = pos;
     vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
 
     // Particle scale evolution (starts compact, expands into airy wisps)
@@ -64,21 +67,25 @@ const smokeVertexShader = /* glsl */ `
     // Organic fade envelope (fast rise, gentle long dissipation)
     float fadeIn = smoothstep(0.0, 0.18, t);
     float fadeOut = smoothstep(1.0, 0.45, t);
-    float baseOpacity = aType > 0.5 ? 0.15 : 0.45; // Expanding waves are delicate & translucent
+    float baseOpacity = aType > 0.5 ? 0.16 : 0.42; // Expanding waves are delicate & translucent
     vAlpha = fadeIn * fadeOut * uIntensity * baseOpacity;
 
     gl_Position = projectionMatrix * mvPos;
   }
 `;
 
-// ── Organic Smoke Fragment Shader with Procedural Fractal Wisps ──
+// ── Organic Smoke Fragment Shader with Face & Eye Clarity Masking ──
 const smokeFragmentShader = /* glsl */ `
   varying float vLife;
   varying float vRotation;
   varying float vAlpha;
   varying float vType;
+  varying vec3 vWorldPos;
   uniform vec3 uColorWisp;
   uniform vec3 uColorWave;
+  uniform vec3 uEyeLeft;
+  uniform vec3 uEyeRight;
+  uniform float uHasFace;
 
   void main() {
     if (vAlpha <= 0.005) discard;
@@ -105,11 +112,20 @@ const smokeFragmentShader = /* glsl */ `
     float internalNoise = sin(uv.x * 14.0 + vLife * 6.0) * cos(uv.y * 14.0 - vLife * 5.0);
     shape *= 0.75 + internalNoise * 0.25;
 
+    // Eye Clarity Protection: Softly attenuate smoke right over the user's eyes so gaze stays clear
+    float alphaMod = vAlpha;
+    if (uHasFace > 0.5) {
+      float dLeft = length(vWorldPos.xy - uEyeLeft.xy);
+      float dRight = length(vWorldPos.xy - uEyeRight.xy);
+      float eyeMask = min(smoothstep(0.04, 0.12, dLeft), smoothstep(0.04, 0.12, dRight));
+      alphaMod *= mix(0.25, 1.0, eyeMask);
+    }
+
     // Color gradient: pale luminous cyan-white core fading to translucent azure
     vec3 baseCol = vType > 0.5 ? uColorWave : uColorWisp;
     vec3 col = mix(baseCol, vec3(0.9, 0.98, 1.0), shape * 0.65);
 
-    gl_FragColor = vec4(col, shape * vAlpha);
+    gl_FragColor = vec4(col, shape * alphaMod);
   }
 `;
 
@@ -159,8 +175,11 @@ export class OrbSmoke {
       uniforms: {
         uTime: { value: 0 },
         uIntensity: { value: 0 },
-        uColorWisp: { value: new THREE.Color(0.25, 0.72, 1.0) }, // Pale blue-white wisp
-        uColorWave: { value: new THREE.Color(0.18, 0.55, 0.95) }, // Translucent scene wave
+        uColorWisp: { value: new THREE.Color(0.28, 0.74, 1.0) }, // Pale blue-white wisp
+        uColorWave: { value: new THREE.Color(0.18, 0.58, 0.96) }, // Translucent scene wave
+        uEyeLeft: { value: new THREE.Vector3(0, 0, 0) },
+        uEyeRight: { value: new THREE.Vector3(0, 0, 0) },
+        uHasFace: { value: 0.0 },
       },
       transparent: true,
       depthWrite: false,
@@ -171,7 +190,7 @@ export class OrbSmoke {
     this.group.add(this.points);
   }
 
-  _emit(type, orbPos, handVel, charge, scaleMultiplier) {
+  _emit(type, orbPos, handVel, charge, scaleMultiplier, facePos) {
     let index;
     if (type === 0) {
       // Local curling wisp (indices 0 .. LOCAL_SMOKE_COUNT-1)
@@ -193,7 +212,7 @@ export class OrbSmoke {
     // Origin around orb
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(Math.random() * 2 - 1);
-    const r = (type === 0 ? 0.04 + Math.random() * 0.05 : 0.08 + Math.random() * 0.08) * scaleMultiplier;
+    const r = (type === 0 ? 0.04 + Math.random() * 0.05 : 0.07 + Math.random() * 0.07) * scaleMultiplier;
 
     pos.array[index * 3] = orbPos.x + Math.sin(phi) * Math.cos(theta) * r;
     pos.array[index * 3 + 1] = orbPos.y + Math.sin(phi) * Math.sin(theta) * r;
@@ -208,17 +227,27 @@ export class OrbSmoke {
     if (type === 0) {
       sizes.array[index] = (9.0 + Math.random() * 8.0) * scaleMultiplier;
     } else {
-      // Expanding wave is larger
       sizes.array[index] = (22.0 + Math.random() * 18.0) * scaleMultiplier;
     }
 
-    // Velocity: outward expansion + hand motion trails + upward float
+    // Velocity
     const speedMag = (type === 0 ? 0.035 : 0.065) * (1.0 + charge * 0.5) * scaleMultiplier;
     const trailBiasX = -handVel.x * 0.35;
     const trailBiasY = -handVel.y * 0.35;
 
-    vels.array[index * 3] = (Math.random() - 0.5) * speedMag * 2.0 + trailBiasX;
-    vels.array[index * 3 + 1] = Math.random() * speedMag * 1.5 + 0.02 * scaleMultiplier + trailBiasY;
+    // If face is tracked, a portion of the expanding energy waves drift across upper body toward face
+    let driftToFaceX = 0;
+    let driftToFaceY = 0;
+    if (type === 1 && facePos) {
+      const dx = facePos.x - orbPos.x;
+      const dy = facePos.y - orbPos.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      driftToFaceX = (dx / dist) * 0.035;
+      driftToFaceY = (dy / dist) * 0.035;
+    }
+
+    vels.array[index * 3] = (Math.random() - 0.5) * speedMag * 2.0 + trailBiasX + driftToFaceX;
+    vels.array[index * 3 + 1] = Math.random() * speedMag * 1.5 + 0.02 * scaleMultiplier + trailBiasY + driftToFaceY;
     vels.array[index * 3 + 2] = (Math.random() - 0.5) * speedMag * 2.0;
 
     pos.needsUpdate = true;
@@ -229,17 +258,26 @@ export class OrbSmoke {
     vels.needsUpdate = true;
   }
 
-  update(dt, orbPos, intensity, densityScale, handSpeed, handVel, charge, scaleMultiplier = 1.0) {
+  update(dt, orbPos, intensity, densityScale, handSpeed, handVel, charge, scaleMultiplier = 1.0, faceData = null) {
     this.time += dt;
     this.material.uniforms.uTime.value = this.time;
     this.material.uniforms.uIntensity.value = intensity * densityScale;
+
+    // Face data for eye clarity
+    if (faceData && faceData.leftEye && faceData.rightEye) {
+      this.material.uniforms.uEyeLeft.value.set(faceData.leftEye.x, faceData.leftEye.y, faceData.leftEye.z);
+      this.material.uniforms.uEyeRight.value.set(faceData.rightEye.x, faceData.rightEye.y, faceData.rightEye.z);
+      this.material.uniforms.uHasFace.value = 1.0;
+    } else {
+      this.material.uniforms.uHasFace.value = 0.0;
+    }
 
     if (intensity > 0.02) {
       // 1. Emit local curling smoke wisps
       const localRate = (14.0 + handSpeed * 32.0 + charge * 20.0) * densityScale;
       this.localEmitTimer += dt * localRate;
       while (this.localEmitTimer >= 1.0) {
-        this._emit(0, orbPos, handVel, charge, scaleMultiplier);
+        this._emit(0, orbPos, handVel, charge, scaleMultiplier, faceData ? faceData.faceCenter : null);
         this.localEmitTimer -= 1.0;
       }
 
@@ -247,7 +285,7 @@ export class OrbSmoke {
       const waveRate = (2.5 + charge * 4.0 + handSpeed * 6.0) * densityScale;
       this.waveEmitTimer += dt * waveRate;
       while (this.waveEmitTimer >= 1.0) {
-        this._emit(1, orbPos, handVel, charge, scaleMultiplier);
+        this._emit(1, orbPos, handVel, charge, scaleMultiplier, faceData ? faceData.faceCenter : null);
         this.waveEmitTimer -= 1.0;
       }
     }
