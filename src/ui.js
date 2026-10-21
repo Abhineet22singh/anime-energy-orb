@@ -1,15 +1,14 @@
 /**
- * ui.js – Interface bindings and state management
+ * ui.js – Production UI management, glass HUD, composite snapshot & entrance portal
  */
 
-/** @type {Object<string, HTMLElement>} */
 const els = {};
 
 let settings = {
-  orbSize: 1,
-  energy: 1,
-  smokeDensity: 1,
-  particleDensity: 1,
+  orbSize: 1.0,
+  energy: 1.0,
+  smokeDensity: 1.0,
+  particleDensity: 1.0,
   bloomEnabled: true,
   smokeEnabled: true,
   particlesEnabled: true,
@@ -19,41 +18,46 @@ let settings = {
   soundEnabled: true,
 };
 
-let onStart = null;
-let onStop = null;
-let onDemo = null;
+let onEnter = null;
 let onReset = null;
 let onSoundToggle = null;
+let hasTrackedHandOnce = false;
 
-/**
- * Initialise all UI elements and bind events.
- */
 export function initUI(callbacks) {
-  onStart = callbacks.onStart;
-  onStop = callbacks.onStop;
-  onDemo = callbacks.onDemo;
+  onEnter = callbacks.onEnter;
   onReset = callbacks.onReset;
   onSoundToggle = callbacks.onSoundToggle;
 
   // Cache elements
-  els.loadingScreen = document.getElementById('loading-screen');
+  els.portalScreen = document.getElementById('portal-screen');
+  els.loaderStatus = document.getElementById('loader-status');
+  els.statusMsg = els.portalScreen?.querySelector('.status-msg');
+  els.btnEnter = document.getElementById('btn-enter');
   els.app = document.getElementById('app');
-  els.statusCamera = document.getElementById('status-camera');
-  els.statusTracking = document.getElementById('status-tracking');
-  els.statusGesture = document.getElementById('status-gesture');
-  els.btnStart = document.getElementById('btn-start');
-  els.btnStop = document.getElementById('btn-stop');
-  els.btnDemo = document.getElementById('btn-demo');
-  els.btnReset = document.getElementById('btn-reset');
+  els.cameraFeed = document.getElementById('camera-feed');
+  els.onboardingHint = document.getElementById('onboarding-hint');
+  els.gesturePill = document.getElementById('gesture-pill');
+  els.gestureIcon = document.getElementById('gesture-icon');
+  els.gestureLabel = document.getElementById('gesture-label');
   els.btnSound = document.getElementById('btn-sound');
   els.btnScreenshot = document.getElementById('btn-screenshot');
   els.btnFullscreen = document.getElementById('btn-fullscreen');
   els.sidePanel = document.getElementById('side-panel');
   els.btnPanelToggle = document.getElementById('btn-panel-toggle');
+  els.btnPanelClose = document.getElementById('btn-panel-close');
+  els.btnReset = document.getElementById('btn-reset');
+
+  // Sliders & value badges
   els.sliderOrbSize = document.getElementById('slider-orb-size');
+  els.valOrbSize = document.getElementById('val-orb-size');
   els.sliderEnergy = document.getElementById('slider-energy');
+  els.valEnergy = document.getElementById('val-energy');
   els.sliderSmoke = document.getElementById('slider-smoke');
+  els.valSmoke = document.getElementById('val-smoke');
   els.sliderParticles = document.getElementById('slider-particles');
+  els.valParticles = document.getElementById('val-particles');
+
+  // Toggles
   els.toggleBloom = document.getElementById('toggle-bloom');
   els.toggleSmoke = document.getElementById('toggle-smoke');
   els.toggleParticles = document.getElementById('toggle-particles');
@@ -61,7 +65,12 @@ export function initUI(callbacks) {
   els.toggleFilaments = document.getElementById('toggle-filaments');
   els.toggleSkeleton = document.getElementById('toggle-skeleton');
 
-  // Sound button
+  // Entrance button
+  els.btnEnter?.addEventListener('click', () => {
+    if (onEnter) onEnter();
+  });
+
+  // Sound toggle
   els.btnSound?.addEventListener('click', () => {
     if (onSoundToggle) {
       const state = onSoundToggle();
@@ -69,146 +78,179 @@ export function initUI(callbacks) {
     }
   });
 
-  // Filaments toggle
-  els.toggleFilaments?.addEventListener('change', (e) => {
-    settings.filamentsEnabled = e.target.checked;
-  });
-
-  // Skeleton toggle
-  els.toggleSkeleton?.addEventListener('change', (e) => {
-    settings.skeletonEnabled = e.target.checked;
-  });
-
-  // Button events
-  els.btnStart.addEventListener('click', () => {
-    if (onStart) onStart();
-  });
-  els.btnStop.addEventListener('click', () => {
-    if (onStop) onStop();
-  });
-  els.btnDemo.addEventListener('click', () => {
-    if (onDemo) onDemo();
-  });
-  els.btnReset.addEventListener('click', () => {
-    if (onReset) onReset();
-  });
-
   // Fullscreen
-  els.btnFullscreen.addEventListener('click', () => {
+  els.btnFullscreen?.addEventListener('click', () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(() => {});
     }
   });
 
-  // Panel toggle
-  els.btnPanelToggle.addEventListener('click', () => {
-    els.sidePanel.classList.toggle('collapsed');
+  // Side Panel Toggle & Close
+  els.btnPanelToggle?.addEventListener('click', () => {
+    els.sidePanel?.classList.toggle('collapsed');
   });
 
-  // Sliders
-  els.sliderOrbSize.addEventListener('input', (e) => {
+  els.btnPanelClose?.addEventListener('click', () => {
+    els.sidePanel?.classList.add('collapsed');
+  });
+
+  // Reset
+  els.btnReset?.addEventListener('click', () => {
+    if (onReset) onReset();
+  });
+
+  // Sliders with value badges
+  els.sliderOrbSize?.addEventListener('input', (e) => {
     settings.orbSize = parseFloat(e.target.value);
-  });
-  els.sliderEnergy.addEventListener('input', (e) => {
-    settings.energy = parseFloat(e.target.value);
-  });
-  els.sliderSmoke.addEventListener('input', (e) => {
-    settings.smokeDensity = parseFloat(e.target.value);
-  });
-  els.sliderParticles.addEventListener('input', (e) => {
-    settings.particleDensity = parseFloat(e.target.value);
+    if (els.valOrbSize) els.valOrbSize.textContent = `${settings.orbSize.toFixed(2)}x`;
   });
 
-  // Toggles
-  els.toggleBloom.addEventListener('change', (e) => {
-    settings.bloomEnabled = e.target.checked;
+  els.sliderEnergy?.addEventListener('input', (e) => {
+    settings.energy = parseFloat(e.target.value);
+    if (els.valEnergy) els.valEnergy.textContent = `${settings.energy.toFixed(2)}x`;
   });
-  els.toggleSmoke.addEventListener('change', (e) => {
-    settings.smokeEnabled = e.target.checked;
+
+  els.sliderSmoke?.addEventListener('input', (e) => {
+    settings.smokeDensity = parseFloat(e.target.value);
+    if (els.valSmoke) els.valSmoke.textContent = `${settings.smokeDensity.toFixed(1)}x`;
   });
-  els.toggleParticles.addEventListener('change', (e) => {
-    settings.particlesEnabled = e.target.checked;
+
+  els.sliderParticles?.addEventListener('input', (e) => {
+    settings.particleDensity = parseFloat(e.target.value);
+    if (els.valParticles) els.valParticles.textContent = `${settings.particleDensity.toFixed(1)}x`;
   });
-  els.toggleArcs.addEventListener('change', (e) => {
-    settings.arcsEnabled = e.target.checked;
-  });
+
+  // VFX Layer Toggles
+  els.toggleBloom?.addEventListener('change', (e) => { settings.bloomEnabled = e.target.checked; });
+  els.toggleSmoke?.addEventListener('change', (e) => { settings.smokeEnabled = e.target.checked; });
+  els.toggleParticles?.addEventListener('change', (e) => { settings.particlesEnabled = e.target.checked; });
+  els.toggleArcs?.addEventListener('change', (e) => { settings.arcsEnabled = e.target.checked; });
+  els.toggleFilaments?.addEventListener('change', (e) => { settings.filamentsEnabled = e.target.checked; });
+  els.toggleSkeleton?.addEventListener('change', (e) => { settings.skeletonEnabled = e.target.checked; });
 }
 
-/**
- * Get current settings.
- */
 export function getSettings() {
   return settings;
 }
 
-/**
- * Hide loading screen and show app.
- */
-export function showApp() {
-  els.loadingScreen.classList.add('hidden');
-  els.app.classList.remove('hidden');
+export function setModelReady() {
+  if (els.loaderStatus) els.loaderStatus.classList.add('hidden');
+  if (els.btnEnter) els.btnEnter.classList.remove('hidden');
 }
 
-/**
- * Update loading subtitle text.
- */
-export function setLoadingText(text) {
-  const sub = els.loadingScreen?.querySelector('.loader-subtitle');
-  if (sub) sub.textContent = text;
+export function setStatusText(text) {
+  if (els.statusMsg) els.statusMsg.textContent = text;
 }
 
-/**
- * Update status pills.
- */
-export function setCameraStatus(online) {
-  els.statusCamera.className = `status-pill ${online ? 'online' : 'offline'}`;
-  els.statusCamera.textContent = online ? 'CAM ✓' : 'CAM ✗';
+export function enterExperience() {
+  if (els.portalScreen) {
+    els.portalScreen.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+    els.portalScreen.style.opacity = '0';
+    els.portalScreen.style.transform = 'scale(1.05)';
+    setTimeout(() => {
+      els.portalScreen.classList.add('hidden');
+    }, 600);
+  }
+  if (els.app) els.app.classList.remove('hidden');
 }
 
-export function setTrackingStatus(online) {
-  els.statusTracking.className = `status-pill ${online ? 'online' : 'offline'}`;
-  els.statusTracking.textContent = online ? 'HAND ✓' : 'HAND ✗';
-}
+export function setGestureDisplay(gesture, isTwoHand = false) {
+  if (!els.gesturePill) return;
 
-export function setGestureDisplay(gesture) {
-  const icons = {
-    none: '—',
-    open: '🖐 Open',
-    fist: '✊ Fist',
-    pinch: '🤏 Pinch',
+  if (isTwoHand) {
+    els.gesturePill.className = 'gesture-pill open';
+    if (els.gestureIcon) els.gestureIcon.textContent = '🙌';
+    if (els.gestureLabel) els.gestureLabel.textContent = 'DUAL PALM';
+    notifyHandTracked();
+    return;
+  }
+
+  const map = {
+    open: { icon: '🖐', label: 'OPEN PALM', class: 'open' },
+    fist: { icon: '✊', label: 'CHARGING', class: 'fist' },
+    pinch: { icon: '🤏', label: 'PINCH SCALE', class: 'pinch' },
+    none: { icon: '👁️', label: 'SEARCHING', class: '' },
   };
-  els.statusGesture.textContent = icons[gesture] || gesture;
+
+  const g = map[gesture] || map.none;
+  els.gesturePill.className = `gesture-pill ${g.class}`;
+  if (els.gestureIcon) els.gestureIcon.textContent = g.icon;
+  if (els.gestureLabel) els.gestureLabel.textContent = g.label;
+
+  if (gesture !== 'none') {
+    notifyHandTracked();
+  }
+}
+
+function notifyHandTracked() {
+  if (!hasTrackedHandOnce) {
+    hasTrackedHandOnce = true;
+    if (els.onboardingHint) {
+      els.onboardingHint.classList.add('fade-out');
+    }
+  }
 }
 
 /**
- * Show started state.
+ * Composite Mirror Selfie Photo Capture
+ * Blends live mirrored camera feed + Three.js canvas into an HD photo download
  */
-export function setStarted() {
-  els.btnStart.classList.add('hidden');
-  els.btnStop.classList.remove('hidden');
-}
+export function setupCompositeScreenshot(renderer) {
+  els.btnScreenshot?.addEventListener('click', () => {
+    const video = document.getElementById('camera-feed');
+    const threeCanvas = renderer.domElement;
 
-/**
- * Show stopped state.
- */
-export function setStopped() {
-  els.btnStart.classList.remove('hidden');
-  els.btnStop.classList.add('hidden');
-}
+    const w = threeCanvas.width;
+    const h = threeCanvas.height;
 
-/**
- * Take a screenshot from the canvas.
- */
-export function setupScreenshot(renderer) {
-  els.btnScreenshot.addEventListener('click', () => {
-    renderer.domElement.toBlob((blob) => {
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = w;
+    exportCanvas.height = h;
+    const ctx = exportCanvas.getContext('2d');
+
+    // 1. Draw mirrored camera background if video ready
+    if (video && video.readyState >= 2) {
+      ctx.save();
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1); // Horizontal flip for mirror selfie
+
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const vAspect = vw / vh;
+      const cAspect = w / h;
+
+      let dw, dh, dx, dy;
+      if (cAspect > vAspect) {
+        dw = w;
+        dh = w / vAspect;
+        dx = 0;
+        dy = (h - dh) / 2;
+      } else {
+        dh = h;
+        dw = h * vAspect;
+        dx = (w - dw) / 2;
+        dy = 0;
+      }
+
+      ctx.drawImage(video, dx, dy, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 2. Draw 3D Three.js effects layer on top
+    ctx.drawImage(threeCanvas, 0, 0, w, h);
+
+    // 3. Trigger download
+    exportCanvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `energy-orb-${Date.now()}.png`;
+      a.download = `anime-energy-selfie-${Date.now()}.png`;
       a.click();
       URL.revokeObjectURL(url);
     }, 'image/png');

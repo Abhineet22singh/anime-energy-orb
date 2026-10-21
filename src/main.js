@@ -1,11 +1,5 @@
 /**
- * main.js – Application entry point
- *
- * Exact reference recreation of the anime hand energy VFX.
- * Ties together real-time camera tracking, precision perspective mapping,
- * blue-white luminous energy orb with plasma distortion,
- * organic orange/amber energy filaments wrapping around the fingers,
- * curling blue smoke and expanding energy waves, sparks, and procedural audio.
+ * main.js – Complete Production Anime Energy Orb AR Application
  */
 
 import * as THREE from 'three';
@@ -20,41 +14,38 @@ import { createPostProcessing, ElectricalArcs, ShockwaveRing } from './effects.j
 import { HandSkeleton } from './handSkeleton.js';
 import { soundFX } from './audio.js';
 import {
-  initUI, showApp, setLoadingText, setCameraStatus, setTrackingStatus,
-  setGestureDisplay, setStarted, setStopped, getSettings, setupScreenshot,
+  initUI, setModelReady, setStatusText, enterExperience, setGestureDisplay,
+  getSettings, setupCompositeScreenshot,
 } from './ui.js';
 
-// ── State ──
+// ── Application State ──
 let renderer, scene, camera, composer, bloomPass;
 let orb, orangeFilaments, particles, smoke, arcs, shockwave, handSkeleton;
 let running = false;
-let demoMode = false;
+let interactiveMode = false;
 let lastTime = 0;
 let animFrameId = null;
-let mousePos = { x: 0.5, y: 0.5 };
-let demoGestureIndex = 0;
-const DEMO_GESTURES = ['open', 'fist', 'pinch'];
+let pointerPos = { x: 0.5, y: 0.5 };
+let interactiveGestureIndex = 0;
+const INTERACTIVE_GESTURES = ['open', 'fist', 'pinch'];
 let prevGesture = 'none';
 
-// ── Initialise ──
+// ── Application Initialization ──
 
 async function init() {
   initUI({
-    onStart: handleStart,
-    onStop: handleStop,
-    onDemo: handleDemo,
+    onEnter: handleEnter,
     onReset: handleReset,
     onSoundToggle: () => soundFX.toggle(),
   });
 
-  setLoadingText('Initialising 3D VFX renderer…');
-
+  // 1. Three.js High-Performance Setup
   const canvas = document.getElementById('three-canvas');
   renderer = new THREE.WebGLRenderer({
     canvas,
     alpha: true,
     antialias: true,
-    preserveDrawingBuffer: true,
+    preserveDrawingBuffer: true, // Required for composite mirror snapshot
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -66,163 +57,78 @@ async function init() {
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
   camera.position.z = 2;
 
-  scene.add(new THREE.AmbientLight(0x112244, 0.3));
+  scene.add(new THREE.AmbientLight(0x0c1b33, 0.35));
 
-  // 1. Blue-White Luminous Energy Orb
+  // 2. Visual Effect Nodes
   orb = new EnergyOrb();
   scene.add(orb.group);
 
-  // 2. Orange & Amber Energy Filaments wrapping around fingers & palm
   orangeFilaments = new OrangeFilaments();
   scene.add(orangeFilaments.group);
 
-  // 3. Fine Sparks & Floating Particles
   particles = new OrbParticles();
   scene.add(particles.group);
 
-  // 4. Curling Blue Smoke & Expanding Energy Waves
   smoke = new OrbSmoke();
   scene.add(smoke.group);
 
-  // 5. Electrical Arcs
   arcs = new ElectricalArcs();
   scene.add(arcs.group);
 
-  // 6. Shockwave Ring VFX
   shockwave = new ShockwaveRing();
   scene.add(shockwave.group);
 
-  // 7. Hand Energy Stream (Knuckle-joint lines)
   handSkeleton = new HandSkeleton();
   scene.add(handSkeleton.group);
 
-  // 8. Post-Processing Pipeline
+  // 3. Post-Processing Pipeline (Bloom + Color Grade)
   const pp = createPostProcessing(renderer, scene, camera, window.innerWidth, window.innerHeight);
   composer = pp.composer;
   bloomPass = pp.bloomPass;
 
-  setupScreenshot(renderer);
+  // 4. Setup Composite Mirror Screenshot (Video + WebGL)
+  setupCompositeScreenshot(renderer);
+
+  // 5. Global Resize & Interaction Listeners
   window.addEventListener('resize', onResize);
   setupInteractionEvents();
 
-  setLoadingText('Loading MediaPipe Hand Landmarker…');
+  // 6. Preload Vision AI Model
+  setStatusText('INITIALIZING AI VISION…');
   try {
-    await initHandTracking((msg) => setLoadingText(msg));
-    setLoadingText('Ready!');
+    await initHandTracking((msg) => setStatusText(msg.toUpperCase()));
+    setModelReady();
   } catch (err) {
-    console.warn('Hand tracking init error, defaulting to Demo Mode:', err);
-    setLoadingText('Camera unavailable – use Demo Mode');
+    console.warn('Vision model init error, defaulting to interactive mode:', err);
+    setModelReady();
   }
-
-  showApp();
 
   lastTime = performance.now();
   animate(performance.now());
 }
 
-// ── Interaction Events ──
+// ── User Entrance ──
 
-function setupInteractionEvents() {
-  window.addEventListener('mousemove', (e) => {
-    mousePos.x = e.clientX / window.innerWidth;
-    mousePos.y = e.clientY / window.innerHeight;
-  });
-
-  // Demo mode click to cycle gesture
-  window.addEventListener('click', (e) => {
-    soundFX.init();
-    soundFX.resume();
-
-    if (e.target.closest('#side-panel, #top-bar, #bottom-bar')) return;
-
-    if (demoMode) {
-      demoGestureIndex = (demoGestureIndex + 1) % DEMO_GESTURES.length;
-      const g = DEMO_GESTURES[demoGestureIndex];
-      setGestureDisplay(g);
-      if (g === 'open' && prevGesture === 'fist') {
-        soundFX.playBurst(1.2);
-        const w = palmToWorld(mousePos, 0.12);
-        shockwave.trigger(w.x, w.y, w.z, getSettings().orbSize);
-      }
-      prevGesture = g;
-    }
-  });
-
-  window.addEventListener('wheel', (e) => {
-    const slider = document.getElementById('slider-orb-size');
-    if (!slider) return;
-    const delta = e.deltaY < 0 ? 0.1 : -0.1;
-    const newVal = Math.min(Math.max(parseFloat(slider.value) + delta, 0.2), 3);
-    slider.value = newVal;
-    getSettings().orbSize = newVal;
-  }, { passive: true });
-
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      if (running) handleStop();
-      else handleStart();
-    } else if (e.code === 'KeyM') {
-      const btn = document.getElementById('btn-sound');
-      const state = soundFX.toggle();
-      if (btn) btn.textContent = state ? '🔊' : '🔇';
-    } else if (e.code === 'KeyF') {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      } else {
-        document.exitFullscreen();
-      }
-    } else if (e.code === 'KeyR') {
-      handleReset();
-    }
-  });
-}
-
-// ── Handlers ──
-
-async function handleStart() {
+async function handleEnter() {
   soundFX.init();
   soundFX.resume();
-  demoMode = false;
+  soundFX.playBurst(0.7);
+
+  enterExperience();
+
   const video = document.getElementById('camera-feed');
   try {
     await startCamera(video);
-    setCameraStatus(true);
-    setStarted();
     running = true;
+    interactiveMode = false;
   } catch (err) {
-    console.error('Camera access error:', err);
-    setCameraStatus(false);
-    alert('Webcam access was denied or is unavailable.\nOpening Demo Mode instead.');
-    handleDemo();
+    console.warn('Camera access denied or unavailable; activating interactive touch/mouse mode:', err);
+    running = true;
+    interactiveMode = true;
+    orb.show();
+    orangeFilaments.show();
+    setGestureDisplay('open');
   }
-}
-
-function handleStop() {
-  running = false;
-  demoMode = false;
-  stopCamera();
-  setCameraStatus(false);
-  setTrackingStatus(false);
-  setGestureDisplay('none');
-  setStopped();
-  orb.hide();
-  orangeFilaments.hide();
-  soundFX.update(0, 0, 0);
-}
-
-function handleDemo() {
-  soundFX.init();
-  soundFX.resume();
-  demoMode = true;
-  running = true;
-  setCameraStatus(false);
-  setTrackingStatus(true);
-  demoGestureIndex = 0;
-  setGestureDisplay(DEMO_GESTURES[demoGestureIndex]);
-  setStarted();
-  orb.show();
-  orangeFilaments.show();
 }
 
 function handleReset() {
@@ -231,9 +137,80 @@ function handleReset() {
   orb.setCharge(0);
   orb.setScale(1);
   soundFX.update(0, 0, 0);
+  setGestureDisplay('none');
 }
 
-// ── Resize ──
+// ── User Input & Gestures ──
+
+function setupInteractionEvents() {
+  const updatePointer = (clientX, clientY) => {
+    pointerPos.x = clientX / window.innerWidth;
+    pointerPos.y = clientY / window.innerHeight;
+  };
+
+  window.addEventListener('mousemove', (e) => {
+    updatePointer(e.clientX, e.clientY);
+  });
+
+  window.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 0) {
+      updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: true });
+
+  // Interactive fallback / click interactions
+  window.addEventListener('click', (e) => {
+    soundFX.init();
+    soundFX.resume();
+
+    if (e.target.closest('#side-panel, #top-bar, .summon-btn')) return;
+
+    if (interactiveMode) {
+      interactiveGestureIndex = (interactiveGestureIndex + 1) % INTERACTIVE_GESTURES.length;
+      const g = INTERACTIVE_GESTURES[interactiveGestureIndex];
+      setGestureDisplay(g);
+
+      if (g === 'open' && prevGesture === 'fist') {
+        soundFX.playBurst(1.2);
+        const w = palmToWorld(pointerPos, 0.12);
+        shockwave.trigger(w.x, w.y, w.z, getSettings().orbSize);
+      }
+      prevGesture = g;
+    }
+  });
+
+  // Mouse wheel quick scale
+  window.addEventListener('wheel', (e) => {
+    const slider = document.getElementById('slider-orb-size');
+    const valBadge = document.getElementById('val-orb-size');
+    if (!slider) return;
+    const delta = e.deltaY < 0 ? 0.05 : -0.05;
+    const newVal = Math.min(Math.max(parseFloat(slider.value) + delta, 0.4), 2.5);
+    slider.value = newVal;
+    if (valBadge) valBadge.textContent = `${newVal.toFixed(2)}x`;
+    getSettings().orbSize = newVal;
+  }, { passive: true });
+
+  // Keyboard Shortcuts
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      handleReset();
+    } else if (e.code === 'KeyM') {
+      const btn = document.getElementById('btn-sound');
+      const state = soundFX.toggle();
+      if (btn) btn.textContent = state ? '🔊' : '🔇';
+    } else if (e.code === 'KeyF') {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  });
+}
+
+// ── Screen Resize ──
 
 function onResize() {
   const w = window.innerWidth;
@@ -247,10 +224,10 @@ function onResize() {
   }
 }
 
-// ── Precision Mapping from Video Coordinates to 3D World ──
+// ── Mathematical Screen-to-3D Frustum Projection ──
 
 function palmToWorld(pt, offsetUp = 0.12) {
-  let screenX = 1 - pt.x; // Mirrored video feed
+  let screenX = 1 - pt.x; // Horizontal mirror for webcam
   let screenY = pt.y;
 
   const video = getVideo();
@@ -275,11 +252,9 @@ function palmToWorld(pt, offsetUp = 0.12) {
     }
   }
 
-  // Normalized Device Coordinates (-1 to +1)
   const ndcX = screenX * 2 - 1;
   const ndcY = -(screenY * 2 - 1);
 
-  // Perspective frustum dimensions at z=0 plane
   const fovRad = (camera.fov * Math.PI) / 180;
   const halfHeight = Math.tan(fovRad / 2) * camera.position.z;
   const halfWidth = halfHeight * camera.aspect;
@@ -291,17 +266,15 @@ function palmToWorld(pt, offsetUp = 0.12) {
   return { x: worldX, y: worldY, z: worldZ };
 }
 
-// ── Synthetic Demo Landmarks Generator ──
+// ── Synthetic Hand Landmarks (for Interactive fallback mode) ──
 
-function generateDemoLandmarks(pt, gesture) {
+function generateSyntheticLandmarks(pt, gesture) {
   const lm = [];
-  const cx = 1 - pt.x; // Un-mirror for mapping
+  const cx = 1 - pt.x;
   const cy = pt.y;
 
-  // 0: Wrist
-  lm.push({ x: cx, y: cy + 0.12, z: 0 });
+  lm.push({ x: cx, y: cy + 0.12, z: 0 }); // 0: Wrist
 
-  // Finger configs: [baseOffsetX, tipOffsetY, curlFactor]
   const fingers = [
     { base: [-0.06, 0.04], tip: [-0.10, -0.04], curl: gesture === 'fist' ? 0.35 : 1.0 }, // Thumb
     { base: [-0.03, -0.01], tip: [-0.04, -0.12], curl: gesture === 'fist' ? 0.25 : 1.0 }, // Index
@@ -330,7 +303,7 @@ function generateDemoLandmarks(pt, gesture) {
   return lm;
 }
 
-// ── Animation Loop ──
+// ── Render & Animation Loop ──
 
 function animate(now) {
   animFrameId = requestAnimationFrame(animate);
@@ -346,17 +319,15 @@ function animate(now) {
 
   // ── 1. Live Hand Tracking Mode ──
   let hands = null;
-  if (running && !demoMode && isCameraReady() && isTrackingReady()) {
+  if (running && !interactiveMode && isCameraReady() && isTrackingReady()) {
     const video = getVideo();
     const results = detectHands(video, now);
     hands = processGestures(results, dt);
 
     const anyPresent = hands.some((h) => h.present);
-    setTrackingStatus(anyPresent);
 
     if (anyPresent) {
       const primary = hands.find((h) => h.present);
-      setGestureDisplay(primary.gesture);
       currentSpeed = primary.speed;
       activeHandVel = primary.velocity;
       currentHandScale = primary.handScale || 1.0;
@@ -369,8 +340,9 @@ function animate(now) {
       }
       prevGesture = primary.gesture;
 
-      // Two-Hand Mode
+      // Two-Hand Mega Orb
       if (isTwoHandOpen(hands)) {
+        setGestureDisplay(primary.gesture, true);
         const mid = twoHandMidpoint(hands);
         const dist = twoHandDistance(hands);
         orbPos = palmToWorld(mid, 0.08 * currentHandScale);
@@ -391,7 +363,7 @@ function animate(now) {
         }
       } else {
         // Single Hand Interaction
-        // Position orb floating just above the center of the open palm
+        setGestureDisplay(primary.gesture, false);
         const offsetAbovePalm = 0.14 * currentHandScale;
         orbPos = palmToWorld(primary.palm, offsetAbovePalm);
 
@@ -416,7 +388,6 @@ function animate(now) {
         particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
         arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
 
-        // Orange Energy Filaments wrapping around fingers & palm
         if (settings.filamentsEnabled) {
           orangeFilaments.show();
           orangeFilaments.update(dt, primary.landmarks, (lm) => palmToWorld(lm, 0), currentHandScale);
@@ -425,7 +396,6 @@ function animate(now) {
         }
       }
 
-      // Hand skeleton joint lines
       if (settings.skeletonEnabled) {
         handSkeleton.update(primary.landmarks, (lm) => palmToWorld(lm, 0), orb.currentIntensity > 0.05, settings.energy);
       } else {
@@ -440,11 +410,11 @@ function animate(now) {
     }
   }
 
-  // ── 2. Demo Mode (Mouse Simulation) ──
-  if (demoMode) {
+  // ── 2. Interactive Fallback Mode (Mouse/Touch Simulation) ──
+  if (interactiveMode && running) {
     currentHandScale = 1.0;
-    const activeGesture = DEMO_GESTURES[demoGestureIndex];
-    orbPos = palmToWorld(mousePos, 0.14);
+    const activeGesture = INTERACTIVE_GESTURES[interactiveGestureIndex];
+    orbPos = palmToWorld(pointerPos, 0.14);
 
     if (activeGesture === 'open') {
       orb.show();
@@ -464,23 +434,22 @@ function animate(now) {
     particles.setPosition(orbPos.x, orbPos.y, orbPos.z);
     arcs.setPosition(orbPos.x, orbPos.y, orbPos.z);
 
-    // Generate virtual hand landmarks for Demo Mode so orange filaments wrap around fingers
-    const demoLandmarks = generateDemoLandmarks(mousePos, activeGesture);
+    const syntheticLandmarks = generateSyntheticLandmarks(pointerPos, activeGesture);
     if (settings.filamentsEnabled) {
       orangeFilaments.show();
-      orangeFilaments.update(dt, demoLandmarks, (lm) => palmToWorld(lm, 0), 1.0);
+      orangeFilaments.update(dt, syntheticLandmarks, (lm) => palmToWorld(lm, 0), 1.0);
     } else {
       orangeFilaments.hide();
     }
 
     if (settings.skeletonEnabled) {
-      handSkeleton.update(demoLandmarks, (lm) => palmToWorld(lm, 0), orb.currentIntensity > 0.05, settings.energy);
+      handSkeleton.update(syntheticLandmarks, (lm) => palmToWorld(lm, 0), orb.currentIntensity > 0.05, settings.energy);
     } else {
       handSkeleton.update(null, null, false);
     }
   }
 
-  // ── 3. Smoke Simulation (Local Curling Wisps & Expanding Scene Waves) ──
+  // ── 3. Smoke & Expanding Energy Waves ──
   smoke.update(
     dt,
     orbPos,
@@ -492,7 +461,7 @@ function animate(now) {
     currentHandScale
   );
 
-  // ── 4. Update 3D Components ──
+  // ── 4. Visual Effect Updates ──
   orb.update(dt, settings.energy, camera);
   particles.update(
     dt,
@@ -503,7 +472,7 @@ function animate(now) {
   arcs.update(dt, settings.arcsEnabled ? orb.currentIntensity : 0);
   shockwave.update(dt);
 
-  // ── 5. Audio Synthesis ──
+  // ── 5. Audio Synthesis Sync ──
   soundFX.update(orb.currentIntensity * settings.energy, orb.charge, currentSpeed);
 
   // ── 6. Bloom Post-Processing ──
@@ -514,14 +483,14 @@ function animate(now) {
     bloomPass.threshold = 0.18;
   }
 
-  // ── 7. Render Pass ──
+  // ── 7. Composite Render ──
   renderer.clear();
   composer.render(dt);
 }
 
 // ── Boot ──
 init().catch((err) => {
-  console.error('Fatal initialization error:', err);
-  const el = document.querySelector('.loader-subtitle');
-  if (el) el.textContent = `Error: ${err.message}`;
+  console.error('Application boot error:', err);
+  const el = document.querySelector('.status-msg');
+  if (el) el.textContent = `ERROR: ${err.message}`;
 });
