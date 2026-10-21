@@ -1,5 +1,5 @@
 /**
- * ui.js – Production UI management, glass HUD, composite snapshot & entrance portal
+ * ui.js – Production UI management, glass HUD, composite snapshot, video recording controls & entrance portal
  */
 
 const els = {};
@@ -16,17 +16,30 @@ let settings = {
   filamentsEnabled: true,
   skeletonEnabled: true,
   soundEnabled: true,
+  animeFilterEnabled: true,
+  animeStyle: 1, // 0=Natural, 1=Shonen, 2=Cyberpunk, 3=Ghibli, 4=Manga
+  animeIntensity: 1.0,
+  airDrawEnabled: true,
+  mouthSmokeEnabled: true,
 };
 
 let onEnter = null;
 let onReset = null;
 let onSoundToggle = null;
+let onStyleChange = null;
+let onToggleRecord = null;
+let onToggleAirDraw = null;
+let onClearDrawing = null;
 let hasTrackedHandOnce = false;
 
 export function initUI(callbacks) {
   onEnter = callbacks.onEnter;
   onReset = callbacks.onReset;
   onSoundToggle = callbacks.onSoundToggle;
+  onStyleChange = callbacks.onStyleChange;
+  onToggleRecord = callbacks.onToggleRecord;
+  onToggleAirDraw = callbacks.onToggleAirDraw;
+  onClearDrawing = callbacks.onClearDrawing;
 
   // Cache elements
   els.portalScreen = document.getElementById('portal-screen');
@@ -35,10 +48,14 @@ export function initUI(callbacks) {
   els.btnEnter = document.getElementById('btn-enter');
   els.app = document.getElementById('app');
   els.cameraFeed = document.getElementById('camera-feed');
+  els.animeCanvas = document.getElementById('anime-canvas');
   els.onboardingHint = document.getElementById('onboarding-hint');
   els.gesturePill = document.getElementById('gesture-pill');
   els.gestureIcon = document.getElementById('gesture-icon');
   els.gestureLabel = document.getElementById('gesture-label');
+  els.btnRecord = document.getElementById('btn-record');
+  els.recLabel = document.getElementById('rec-label');
+  els.btnAirDrawToggle = document.getElementById('btn-airdraw-toggle');
   els.btnSound = document.getElementById('btn-sound');
   els.btnScreenshot = document.getElementById('btn-screenshot');
   els.btnFullscreen = document.getElementById('btn-fullscreen');
@@ -56,6 +73,8 @@ export function initUI(callbacks) {
   els.valSmoke = document.getElementById('val-smoke');
   els.sliderParticles = document.getElementById('slider-particles');
   els.valParticles = document.getElementById('val-particles');
+  els.sliderAnimeIntensity = document.getElementById('slider-anime-intensity');
+  els.valAnimeIntensity = document.getElementById('val-anime-intensity');
 
   // Toggles
   els.toggleBloom = document.getElementById('toggle-bloom');
@@ -64,10 +83,59 @@ export function initUI(callbacks) {
   els.toggleArcs = document.getElementById('toggle-arcs');
   els.toggleFilaments = document.getElementById('toggle-filaments');
   els.toggleSkeleton = document.getElementById('toggle-skeleton');
+  els.toggleAnimeFilter = document.getElementById('toggle-anime-filter');
+  els.toggleMouthSmoke = document.getElementById('toggle-mouth-smoke');
+  els.toggleAirDraw = document.getElementById('toggle-airdraw');
+  els.btnClearDrawing = document.getElementById('btn-clear-drawing');
+
+  // Style selector buttons
+  els.styleBtns = document.querySelectorAll('.style-btn');
 
   // Entrance button
   els.btnEnter?.addEventListener('click', () => {
     if (onEnter) onEnter();
+  });
+
+  // Video Record button
+  els.btnRecord?.addEventListener('click', () => {
+    if (onToggleRecord) onToggleRecord();
+  });
+
+  // Air-draw toggle button in header
+  els.btnAirDrawToggle?.addEventListener('click', () => {
+    settings.airDrawEnabled = !settings.airDrawEnabled;
+    if (els.toggleAirDraw) els.toggleAirDraw.checked = settings.airDrawEnabled;
+    setAirDrawUI(settings.airDrawEnabled);
+    if (onToggleAirDraw) onToggleAirDraw(settings.airDrawEnabled);
+  });
+
+  // Air-draw checkbox in drawer
+  els.toggleAirDraw?.addEventListener('change', (e) => {
+    settings.airDrawEnabled = e.target.checked;
+    setAirDrawUI(settings.airDrawEnabled);
+    if (onToggleAirDraw) onToggleAirDraw(settings.airDrawEnabled);
+  });
+
+  // Clear air drawing button
+  els.btnClearDrawing?.addEventListener('click', () => {
+    if (onClearDrawing) onClearDrawing();
+  });
+
+  // Style buttons listener
+  els.styleBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const styleIdx = parseInt(btn.getAttribute('data-style'), 10);
+      setActiveStyleUI(styleIdx);
+      if (onStyleChange) onStyleChange(styleIdx);
+    });
+  });
+
+  // Anime Stylization Intensity
+  els.sliderAnimeIntensity?.addEventListener('input', (e) => {
+    settings.animeIntensity = parseFloat(e.target.value);
+    if (els.valAnimeIntensity) {
+      els.valAnimeIntensity.textContent = `${settings.animeIntensity.toFixed(2)}x`;
+    }
   });
 
   // Sound toggle
@@ -129,6 +197,41 @@ export function initUI(callbacks) {
   els.toggleArcs?.addEventListener('change', (e) => { settings.arcsEnabled = e.target.checked; });
   els.toggleFilaments?.addEventListener('change', (e) => { settings.filamentsEnabled = e.target.checked; });
   els.toggleSkeleton?.addEventListener('change', (e) => { settings.skeletonEnabled = e.target.checked; });
+  els.toggleAnimeFilter?.addEventListener('change', (e) => { settings.animeFilterEnabled = e.target.checked; });
+  els.toggleMouthSmoke?.addEventListener('change', (e) => { settings.mouthSmokeEnabled = e.target.checked; });
+}
+
+export function setActiveStyleUI(styleIdx) {
+  settings.animeStyle = styleIdx;
+  els.styleBtns?.forEach((b) => {
+    const s = parseInt(b.getAttribute('data-style'), 10);
+    if (s === styleIdx) {
+      b.classList.add('active');
+    } else {
+      b.classList.remove('active');
+    }
+  });
+}
+
+export function setRecordingUI(isRecording, timerText = 'REC') {
+  if (!els.btnRecord) return;
+  if (isRecording) {
+    els.btnRecord.classList.add('recording');
+    if (els.recLabel) els.recLabel.textContent = timerText;
+  } else {
+    els.btnRecord.classList.remove('recording');
+    if (els.recLabel) els.recLabel.textContent = 'REC';
+  }
+}
+
+export function setAirDrawUI(enabled) {
+  if (els.btnAirDrawToggle) {
+    if (enabled) {
+      els.btnAirDrawToggle.classList.add('active');
+    } else {
+      els.btnAirDrawToggle.classList.remove('active');
+    }
+  }
 }
 
 export function getSettings() {
@@ -234,11 +337,12 @@ export function resetFramingHint() {
 
 /**
  * Composite Mirror Selfie Photo Capture
- * Blends live mirrored camera feed + Three.js canvas into an HD photo download
+ * Blends live background (Anime-filtered or raw camera) + Three.js canvas into an HD photo
  */
 export function setupCompositeScreenshot(renderer) {
   els.btnScreenshot?.addEventListener('click', () => {
     const video = document.getElementById('camera-feed');
+    const animeCanvas = document.getElementById('anime-canvas');
     const threeCanvas = renderer.domElement;
 
     const w = threeCanvas.width;
@@ -249,8 +353,10 @@ export function setupCompositeScreenshot(renderer) {
     exportCanvas.height = h;
     const ctx = exportCanvas.getContext('2d');
 
-    // 1. Draw mirrored camera background if video ready
-    if (video && video.readyState >= 2) {
+    // 1. Draw stylized anime canvas or mirrored raw video
+    if (animeCanvas && settings.animeFilterEnabled && settings.animeStyle !== 0) {
+      ctx.drawImage(animeCanvas, 0, 0, w, h);
+    } else if (video && video.readyState >= 2) {
       ctx.save();
       ctx.translate(w, 0);
       ctx.scale(-1, 1); // Horizontal flip for mirror selfie

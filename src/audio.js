@@ -189,6 +189,62 @@ class SoundFX {
     }
   }
 
+  /**
+   * Play cold ethereal breath mist sound when mouth opens
+   */
+  playBreath(power = 1.0) {
+    if (!this.isInitialized || !this.enabled || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const bSize = Math.floor(this.ctx.sampleRate * 0.7);
+      const b = this.ctx.createBuffer(1, bSize, this.ctx.sampleRate);
+      const d = b.getChannelData(0);
+      for (let i = 0; i < bSize; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.sin((i / bSize) * Math.PI);
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = b;
+
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.setValueAtTime(650, now);
+      f.frequency.exponentialRampToValueAtTime(320, now + 0.65);
+      f.Q.setValueAtTime(2.5, now);
+
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.22 * Math.min(power, 1.2), now + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.68);
+
+      noise.connect(f);
+      f.connect(g);
+      g.connect(this.masterGain);
+      noise.start(now);
+      noise.stop(now + 0.7);
+    } catch (e) {
+      // Ignore audio synthesis errors
+    }
+  }
+
+  /**
+   * Get audio MediaStream for recording
+   */
+  getAudioStream() {
+    if (!this.ctx) return null;
+    try {
+      if (!this.mediaStreamDest) {
+        this.mediaStreamDest = this.ctx.createMediaStreamDestination();
+        if (this.masterGain) {
+          this.masterGain.connect(this.mediaStreamDest);
+        }
+      }
+      return this.mediaStreamDest.stream;
+    } catch (e) {
+      console.warn('MediaStreamDestination not supported:', e);
+      return null;
+    }
+  }
+
   toggle() {
     this.enabled = !this.enabled;
     if (this.masterGain) {

@@ -1,12 +1,16 @@
 /**
- * main.js – Complete Production Anime Energy Orb AR Application
+ * main.js – Complete Production AI Anime Effect Studio
  *
- * Full Face + Hand Energy + Translucent Blue Smoke Composite:
- * - Real live webcam background showing user's actual face, head, hair, body, and hand
- * - Luminous blue-white energy orb floating above the tracked palm
- * - Animated orange and amber energy strands wrapping around the real fingers and palm
- * - Translucent blue smoke curling from palm across upper body towards face with eye clarity protection
- * - Composite HD selfie photo capture (webcam + VFX combined)
+ * Real-Time Features:
+ * - GPU-accelerated Anime Face Stylization (Bilateral skin smoothing, Sobel ink outlines, Cel-shading)
+ * - 5 Presets: Shonen, Cyberpunk, Ghibli, Manga Ink, Natural
+ * - Real live webcam background showing user's actual face, hair, body, and raised hand
+ * - Floating blue-white plasma energy orb with simplex noise displacement
+ * - Animated orange and amber energy strands wrapping around fingers and palm
+ * - Translucent blue smoke curling from palm across chest and towards face with eye clarity protection
+ * - Real-time mouth-triggered breath mist billowing towards camera when mouth opens or exhales
+ * - Index fingertip tracking with glowing orange particle trails, sparks, and 3D air-drawing
+ * - HD video recording with Web Audio sound capture (.webm/.mp4) and composite selfie snapshot
  */
 
 import * as THREE from 'three';
@@ -20,14 +24,20 @@ import { OrbSmoke } from './smoke.js';
 import { createPostProcessing, ElectricalArcs, ShockwaveRing } from './effects.js';
 import { HandSkeleton } from './handSkeleton.js';
 import { soundFX } from './audio.js';
+import { AnimeFilter } from './animeFilter.js';
+import { MouthSmoke } from './mouthSmoke.js';
+import { AirDrawing } from './airDrawing.js';
+import { videoRecorder } from './recorder.js';
 import {
   initUI, setModelReady, setStatusText, enterExperience, setGestureDisplay,
   getSettings, setupCompositeScreenshot, updateFramingGuidance, resetFramingHint,
+  setRecordingUI, setAirDrawUI, setActiveStyleUI,
 } from './ui.js';
 
 // ── Application State ──
 let renderer, scene, camera, composer, bloomPass;
 let orb, orangeFilaments, particles, smoke, arcs, shockwave, handSkeleton;
+let animeFilter, mouthSmoke, airDrawing;
 let running = false;
 let interactiveMode = false;
 let lastTime = 0;
@@ -44,6 +54,10 @@ async function init() {
     onEnter: handleEnter,
     onReset: handleReset,
     onSoundToggle: () => soundFX.toggle(),
+    onStyleChange: (idx) => animeFilter?.setStyle(idx),
+    onToggleRecord: handleToggleRecord,
+    onToggleAirDraw: (enabled) => airDrawing?.setDrawingMode(enabled),
+    onClearDrawing: () => airDrawing?.clearDrawing(),
   });
 
   // 1. Three.js High-Performance Setup with alpha transparency for live camera compositing
@@ -52,7 +66,7 @@ async function init() {
     canvas,
     alpha: true,
     antialias: true,
-    preserveDrawingBuffer: true, // Required for composite mirror snapshot
+    preserveDrawingBuffer: true, // Required for composite mirror snapshot & video recording
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -66,7 +80,14 @@ async function init() {
 
   scene.add(new THREE.AmbientLight(0x0c1b33, 0.35));
 
-  // 2. Visual Effect Nodes
+  // 2. Initialize GPU Anime Stylization Filter on background canvas
+  const animeCanvas = document.getElementById('anime-canvas');
+  if (animeCanvas) {
+    animeFilter = new AnimeFilter(animeCanvas, window.innerWidth, window.innerHeight);
+    animeFilter.setStyle(getSettings().animeStyle);
+  }
+
+  // 3. Visual Effect Nodes
   orb = new EnergyOrb();
   scene.add(orb.group);
 
@@ -79,6 +100,12 @@ async function init() {
   smoke = new OrbSmoke();
   scene.add(smoke.group);
 
+  mouthSmoke = new MouthSmoke();
+  scene.add(mouthSmoke.group);
+
+  airDrawing = new AirDrawing();
+  scene.add(airDrawing.group);
+
   arcs = new ElectricalArcs();
   scene.add(arcs.group);
 
@@ -88,19 +115,19 @@ async function init() {
   handSkeleton = new HandSkeleton();
   scene.add(handSkeleton.group);
 
-  // 3. Post-Processing Pipeline (Transparent Bloom Pass)
+  // 4. Post-Processing Pipeline (Transparent Bloom Pass)
   const pp = createPostProcessing(renderer, scene, camera, window.innerWidth, window.innerHeight);
   composer = pp.composer;
   bloomPass = pp.bloomPass;
 
-  // 4. Setup Composite Mirror Screenshot (Webcam Video + Three.js VFX)
+  // 5. Setup Composite Mirror Screenshot (Webcam Video + Three.js VFX)
   setupCompositeScreenshot(renderer);
 
-  // 5. Global Resize & Interaction Listeners
+  // 6. Global Resize & Interaction Listeners
   window.addEventListener('resize', onResize);
   setupInteractionEvents();
 
-  // 6. Preload Vision AI (Dual Hand + Face Tracking)
+  // 7. Preload Vision AI (Dual Hand + Face Tracking)
   setStatusText('INITIALIZING AI VISION…');
   try {
     await initVisionTracking((msg) => setStatusText(msg.toUpperCase()));
@@ -128,6 +155,14 @@ async function handleEnter() {
     await startCamera(video);
     running = true;
     interactiveMode = false;
+
+    // Attach video stream to Anime filter
+    if (animeFilter) {
+      animeFilter.setVideo(video);
+      if (video.videoWidth && video.videoHeight) {
+        animeFilter.updateVideoResolution(video.videoWidth, video.videoHeight);
+      }
+    }
   } catch (err) {
     console.warn('Camera access denied or unavailable; activating interactive touch/mouse mode:', err);
     running = true;
@@ -143,9 +178,36 @@ function handleReset() {
   orangeFilaments.hide();
   orb.setCharge(0);
   orb.setScale(1);
+  airDrawing?.clearDrawing();
   soundFX.update(0, 0, 0);
   setGestureDisplay('none');
   resetFramingHint();
+}
+
+function handleToggleRecord() {
+  if (videoRecorder.isRecording()) {
+    videoRecorder.stopRecording();
+    setRecordingUI(false);
+  } else {
+    const settings = getSettings();
+    videoRecorder.startRecording({
+      getBackgroundCanvas: () => {
+        const animeCanvas = document.getElementById('anime-canvas');
+        if (settings.animeFilterEnabled && settings.animeStyle !== 0 && animeCanvas) {
+          return animeCanvas;
+        }
+        return document.getElementById('camera-feed');
+      },
+      getForegroundCanvas: () => renderer.domElement,
+      audioStream: soundFX.getAudioStream(),
+      onTick: (timerText) => setRecordingUI(true, timerText),
+      onError: (err) => {
+        console.error('Recording error:', err);
+        setRecordingUI(false);
+      },
+    });
+    setRecordingUI(true, '00:00');
+  }
 }
 
 // ── User Input & Gestures ──
@@ -208,12 +270,28 @@ function setupInteractionEvents() {
       const btn = document.getElementById('btn-sound');
       const state = soundFX.toggle();
       if (btn) btn.textContent = state ? '🔊' : '🔇';
+    } else if (e.code === 'KeyR') {
+      e.preventDefault();
+      handleToggleRecord();
+    } else if (e.code === 'KeyD') {
+      const s = getSettings();
+      s.airDrawEnabled = !s.airDrawEnabled;
+      setAirDrawUI(s.airDrawEnabled);
+      airDrawing?.setDrawingMode(s.airDrawEnabled);
+      const chk = document.getElementById('toggle-airdraw');
+      if (chk) chk.checked = s.airDrawEnabled;
+    } else if (e.code === 'KeyC') {
+      airDrawing?.clearDrawing();
     } else if (e.code === 'KeyF') {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
       } else {
         document.exitFullscreen().catch(() => {});
       }
+    } else if (e.code >= 'Digit0' && e.code <= 'Digit4') {
+      const styleIdx = parseInt(e.key, 10);
+      setActiveStyleUI(styleIdx);
+      animeFilter?.setStyle(styleIdx);
     }
   });
 }
@@ -229,6 +307,13 @@ function onResize() {
   composer.setSize(w, h);
   if (bloomPass) {
     bloomPass.resolution.set(w, h);
+  }
+  if (animeFilter) {
+    animeFilter.setSize(w, h);
+    const video = getVideo();
+    if (video && video.videoWidth && video.videoHeight) {
+      animeFilter.updateVideoResolution(video.videoWidth, video.videoHeight);
+    }
   }
 }
 
@@ -326,19 +411,47 @@ function animate(now) {
   let currentHandScale = 1.0;
   let faceData = null;
 
+  // ── 0. GPU Anime Stylization Render Pass (Background) ──
+  if (animeFilter) {
+    const animeCanvas = document.getElementById('anime-canvas');
+    if (settings.animeFilterEnabled && settings.animeStyle !== 0 && isCameraReady()) {
+      if (animeCanvas && animeCanvas.style.display !== 'block') {
+        animeCanvas.style.display = 'block';
+      }
+      animeFilter.setIntensity(settings.animeIntensity);
+      animeFilter.setStyle(settings.animeStyle);
+      animeFilter.render(dt);
+    } else {
+      if (animeCanvas && animeCanvas.style.display !== 'none') {
+        animeCanvas.style.display = 'none';
+      }
+    }
+  }
+
   // ── 1. Live Hand & Face Tracking Mode ──
   let hands = null;
   if (running && !interactiveMode && isCameraReady() && isTrackingReady()) {
     const video = getVideo();
     const vision = detectVision(video, now);
 
-    // Extract Face Data (Eyes & Nose Tip) for face-aware smoke curling and eye clarity
+    // Extract Face Data & Trigger Cold Breath Mist
     if (vision.face && vision.face.faceLandmarks && vision.face.faceLandmarks.length > 0) {
       const flm = vision.face.faceLandmarks[0];
       const leftEye = palmToWorld(flm[33], 0);
       const rightEye = palmToWorld(flm[263], 0);
       const noseTip = palmToWorld(flm[4], 0);
       faceData = { leftEye, rightEye, faceCenter: noseTip };
+
+      // Mouth breath mist & cold vapor emitter
+      mouthSmoke.update(
+        dt,
+        flm,
+        (lm) => palmToWorld(lm, 0),
+        settings.mouthSmokeEnabled ? settings.smokeDensity : 0,
+        (power) => soundFX.playBreath(power)
+      );
+    } else {
+      mouthSmoke.update(dt, null, null, 0);
     }
 
     hands = processGestures(vision.hands, dt);
@@ -359,6 +472,14 @@ function animate(now) {
         soundFX.playBurst(1.3);
       }
       prevGesture = primary.gesture;
+
+      // 3D Air-Drawing & Fingertip Spark Trails (Index Tip = Landmark 8)
+      if (primary.landmarks && primary.landmarks.length > 8) {
+        const indexTip3D = palmToWorld(primary.landmarks[8], 0);
+        airDrawing.update(dt, indexTip3D, true, settings.energy);
+      } else {
+        airDrawing.update(dt, null, false, settings.energy);
+      }
 
       // Two-Hand Mega Orb
       if (isTwoHandOpen(hands)) {
@@ -427,6 +548,7 @@ function animate(now) {
       orb.hide();
       orangeFilaments.hide();
       handSkeleton.update(null, null, false);
+      airDrawing.update(dt, null, false, settings.energy);
       prevGesture = 'none';
     }
   }
@@ -468,6 +590,10 @@ function animate(now) {
     } else {
       handSkeleton.update(null, null, false);
     }
+
+    // Air-drawing tracking pointer in interactive fallback mode
+    const synthIndexTip = palmToWorld(syntheticLandmarks[8], 0);
+    airDrawing.update(dt, synthIndexTip, true, settings.energy);
   }
 
   // ── 3. Translucent Blue Smoke & Face-Aware Energy Waves ──
@@ -497,7 +623,7 @@ function animate(now) {
   // ── 5. Audio Synthesis Sync ──
   soundFX.update(orb.currentIntensity * settings.energy, orb.charge, currentSpeed);
 
-  // ── 6. Bloom Post-Processing (Composited over transparent live video) ──
+  // ── 6. Bloom Post-Processing (Composited over transparent live video / anime canvas) ──
   if (bloomPass) {
     bloomPass.enabled = settings.bloomEnabled;
     bloomPass.strength = 1.35 * settings.energy;

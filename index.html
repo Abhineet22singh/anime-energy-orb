@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Anime Energy Orb — Real-Time AR VFX</title>
+  <title>Anime Energy Studio — Real-Time AI AR VFX</title>
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,8 +19,8 @@
         <div class="sigil-ring ring-2"></div>
         <div class="sigil-ring ring-3"></div>
       </div>
-      <h1 class="portal-title">ANIME ENERGY ORB</h1>
-      <p class="portal-tagline">REAL-TIME AUGMENTED REALITY VFX</p>
+      <h1 class="portal-title">ANIME ENERGY STUDIO</h1>
+      <p class="portal-tagline">REAL-TIME AI FACE TRANSFORMATION & AR ENERGY VFX</p>
       
       <div id="loader-status" class="portal-status">
         <div class="status-spinner"></div>
@@ -29,22 +29,25 @@
 
       <button id="btn-enter" class="summon-btn hidden">
         <span class="btn-glow"></span>
-        <span class="btn-text">⚡ SUMMON ENERGY</span>
+        <span class="btn-text">⚡ ENTER STUDIO</span>
       </button>
 
       <div class="portal-instructions">
-        <span>📸 FRAME FACE & RAISED HAND TOGETHER</span>
-        <span>🖐 OPEN PALM • SUMMON</span>
-        <span>✊ CLOSED FIST • CHARGE</span>
-        <span>🤏 PINCH • SCALE</span>
+        <span>📸 FRAME FACE & RAISED HAND IN VIEW</span>
+        <span>🖐 OPEN PALM • SUMMON ENERGY ORB</span>
+        <span>☝️ INDEX FINGER • DRAW GLOWING SHAPES</span>
+        <span>🌬️ OPEN MOUTH • EXHALE BLUE MIST</span>
+        <span>✊ CLOSED FIST • CHARGE ENERGY</span>
+        <span>🤏 PINCH • SCALE ORB SIZE</span>
       </div>
     </div>
   </div>
 
   <!-- Main AR Application View -->
   <div id="app" class="hidden">
-    <!-- Camera Feed & Three.js Canvas -->
+    <!-- Camera Feed & GPU Render Canvases -->
     <video id="camera-feed" autoplay playsinline muted></video>
+    <canvas id="anime-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
     <!-- Top Futuristic Glass HUD -->
@@ -61,10 +64,15 @@
       </div>
 
       <div class="hud-center">
-        <span class="app-branding">KI ENERGY // MK-VII</span>
+        <span class="app-branding">KI ENERGY // AI STUDIO</span>
       </div>
 
       <div class="hud-right">
+        <button id="btn-record" class="hud-btn rec-btn" title="Record HD Video">
+          <span class="rec-dot"></span>
+          <span id="rec-label">REC</span>
+        </button>
+        <button id="btn-airdraw-toggle" class="hud-btn active" title="Toggle Air Drawing Mode">✍️</button>
         <button id="btn-sound" class="hud-btn" title="Toggle Audio (M)">🔊</button>
         <button id="btn-screenshot" class="hud-btn" title="Capture AR Photo">📸</button>
         <button id="btn-panel-toggle" class="hud-btn" title="VFX Settings">⚙️</button>
@@ -81,11 +89,40 @@
     <!-- Side VFX Glass Control Drawer -->
     <aside id="side-panel" class="collapsed">
       <div class="panel-header">
-        <h3>VFX SYNTHESIZER</h3>
+        <h3>AI VFX STUDIO</h3>
         <button id="btn-panel-close" class="close-btn">✕</button>
       </div>
 
       <div class="panel-scroll">
+        <!-- Anime Style Selector -->
+        <div class="control-section">
+          <h4>ANIME TRANSFORMATION</h4>
+          <div class="style-selector-grid">
+            <button class="style-btn active" data-style="1">SHONEN</button>
+            <button class="style-btn" data-style="2">CYBERPUNK</button>
+            <button class="style-btn" data-style="3">GHIBLI</button>
+            <button class="style-btn" data-style="4">MANGA</button>
+            <button class="style-btn" data-style="0">NATURAL</button>
+          </div>
+          <div class="slider-group" style="margin-top: 14px;">
+            <div class="slider-header">
+              <span>Filter Intensity</span>
+              <span id="val-anime-intensity" class="val-badge">1.0x</span>
+            </div>
+            <input type="range" id="slider-anime-intensity" min="0.0" max="1.0" step="0.05" value="1.0">
+          </div>
+        </div>
+
+        <!-- Air Drawing Controls -->
+        <div class="control-section">
+          <h4>AIR DRAWING & FINGER TRAILS</h4>
+          <label class="switch-row">
+            <span>Air-Draw 3D Shapes</span>
+            <input type="checkbox" id="toggle-airdraw" checked>
+          </label>
+          <button id="btn-clear-drawing" class="action-btn-small" style="margin-top: 8px;">🗑 CLEAR AIR DRAWINGS</button>
+        </div>
+
         <div class="control-section">
           <h4>ENERGY DYNAMICS</h4>
           <div class="slider-group">
@@ -124,12 +161,20 @@
         <div class="control-section">
           <h4>VFX LAYERS</h4>
           <label class="switch-row">
-            <span>Cinematic Bloom</span>
-            <input type="checkbox" id="toggle-bloom" checked>
+            <span>Anime Face Stylization</span>
+            <input type="checkbox" id="toggle-anime-filter" checked>
+          </label>
+          <label class="switch-row">
+            <span>Mouth Breath Mist</span>
+            <input type="checkbox" id="toggle-mouth-smoke" checked>
           </label>
           <label class="switch-row">
             <span>Orange Finger Filaments</span>
             <input type="checkbox" id="toggle-filaments" checked>
+          </label>
+          <label class="switch-row">
+            <span>Cinematic Bloom</span>
+            <input type="checkbox" id="toggle-bloom" checked>
           </label>
           <label class="switch-row">
             <span>Expanding Energy Waves</span>
@@ -153,6 +198,9 @@
           <h4>KEYBOARD SHORTCUTS</h4>
           <p><kbd>Space</kbd> Reset / Recalibrate</p>
           <p><kbd>M</kbd> Mute / Unmute Audio</p>
+          <p><kbd>R</kbd> Toggle Video Recording</p>
+          <p><kbd>D</kbd> Toggle Air Drawing</p>
+          <p><kbd>C</kbd> Clear Air Drawing</p>
           <p><kbd>F</kbd> Toggle Fullscreen</p>
           <p><kbd>Scroll</kbd> Quick Orb Scale</p>
         </div>
