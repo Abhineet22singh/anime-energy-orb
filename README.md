@@ -6,14 +6,18 @@ A real-time augmented reality experience that lets you summon and control a glow
 
 ## ✨ Features
 
-- **Real-time hand tracking** via MediaPipe Hand Landmarker
+- **Real-time hand tracking** via MediaPipe Hand Landmarker with precision aspect-ratio and depth compensation
 - **Procedural energy orb** with GLSL shaders, animated distortion, and multiple glow layers
+- **Procedural Web Audio synthesis** with anime energy hum, charge-up whine, electrical crackles, and burst sound FX
+- **Hand Energy Stream (Skeleton)** overlay showing chakra lines flowing into the orb
+- **Explosive shockwave rings** on charge release
 - **Volumetric smoke** particles with turbulence
 - **Floating particles and sparks** orbiting the orb
 - **Electrical arcs** with random flickering
 - **Post-processing**: Unreal Bloom, color grading, vignette
 - **Gesture controls**: open palm, fist, pinch, two-hand mode
-- **Demo mode** with mouse control when camera is unavailable
+- **Demo mode** with mouse control and wheel scaling when camera is unavailable
+- **Hotkeys**: Space (Start/Stop), M (Sound), F (Fullscreen), R (Reset)
 - **Screenshot capture**
 - **Responsive UI** with sliders and toggles
 

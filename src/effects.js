@@ -154,3 +154,90 @@ export class ElectricalArcs {
     }
   }
 }
+
+// ── Energy Shockwave Ring ──
+
+const shockwaveVert = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const shockwaveFrag = /* glsl */ `
+  varying vec2 vUv;
+  uniform float uProgress;
+  uniform vec3 uColor;
+
+  void main() {
+    vec2 uv = vUv * 2.0 - 1.0;
+    float dist = length(uv);
+
+    // Expanding thin ring
+    float ringRadius = uProgress;
+    float thickness = 0.08 * (1.0 - uProgress * 0.5);
+    float ring = smoothstep(ringRadius - thickness, ringRadius, dist) *
+                 smoothstep(ringRadius + thickness, ringRadius, dist);
+
+    float alpha = ring * (1.0 - uProgress) * 0.9;
+    vec3 col = uColor * 2.5;
+
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+export class ShockwaveRing {
+  constructor() {
+    this.group = new THREE.Group();
+    this.progress = 1.0;
+    this.duration = 0.6;
+    this.timer = 0;
+    this.active = false;
+
+    const geo = new THREE.PlaneGeometry(1.6, 1.6);
+    this.mat = new THREE.ShaderMaterial({
+      vertexShader: shockwaveVert,
+      fragmentShader: shockwaveFrag,
+      uniforms: {
+        uProgress: { value: 1.0 },
+        uColor: { value: new THREE.Color(0.2, 0.7, 1.0) },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+
+    this.mesh = new THREE.Mesh(geo, this.mat);
+    this.group.add(this.mesh);
+    this.group.visible = false;
+  }
+
+  trigger(x, y, z, scale = 1.0) {
+    this.group.position.set(x, y, z);
+    this.mesh.scale.setScalar(scale);
+    this.progress = 0;
+    this.timer = 0;
+    this.active = true;
+    this.group.visible = true;
+    this.mat.uniforms.uProgress.value = 0;
+  }
+
+  update(dt) {
+    if (!this.active) return;
+    this.timer += dt;
+    this.progress = Math.min(this.timer / this.duration, 1.0);
+    this.mat.uniforms.uProgress.value = this.progress;
+
+    if (this.progress >= 1.0) {
+      this.active = false;
+      this.group.visible = false;
+    }
+  }
+
+  dispose() {
+    this.mesh.geometry.dispose();
+    this.mat.dispose();
+  }
+}

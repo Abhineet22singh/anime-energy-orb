@@ -14,12 +14,15 @@ let settings = {
   smokeEnabled: true,
   particlesEnabled: true,
   arcsEnabled: true,
+  skeletonEnabled: true,
+  soundEnabled: true,
 };
 
 let onStart = null;
 let onStop = null;
 let onDemo = null;
 let onReset = null;
+let onSoundToggle = null;
 
 /**
  * Initialise all UI elements and bind events.
@@ -29,6 +32,7 @@ export function initUI(callbacks) {
   onStop = callbacks.onStop;
   onDemo = callbacks.onDemo;
   onReset = callbacks.onReset;
+  onSoundToggle = callbacks.onSoundToggle;
 
   // Cache elements
   els.loadingScreen = document.getElementById('loading-screen');
@@ -40,6 +44,7 @@ export function initUI(callbacks) {
   els.btnStop = document.getElementById('btn-stop');
   els.btnDemo = document.getElementById('btn-demo');
   els.btnReset = document.getElementById('btn-reset');
+  els.btnSound = document.getElementById('btn-sound');
   els.btnScreenshot = document.getElementById('btn-screenshot');
   els.btnFullscreen = document.getElementById('btn-fullscreen');
   els.sidePanel = document.getElementById('side-panel');
@@ -52,6 +57,20 @@ export function initUI(callbacks) {
   els.toggleSmoke = document.getElementById('toggle-smoke');
   els.toggleParticles = document.getElementById('toggle-particles');
   els.toggleArcs = document.getElementById('toggle-arcs');
+  els.toggleSkeleton = document.getElementById('toggle-skeleton');
+
+  // Sound button
+  els.btnSound?.addEventListener('click', () => {
+    if (onSoundToggle) {
+      const state = onSoundToggle();
+      els.btnSound.textContent = state ? '🔊' : '🔇';
+    }
+  });
+
+  // Skeleton toggle
+  els.toggleSkeleton?.addEventListener('change', (e) => {
+    settings.skeletonEnabled = e.target.checked;
+  });
 
   // Button events
   els.btnStart.addEventListener('click', () => {
