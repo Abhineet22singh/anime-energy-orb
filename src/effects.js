@@ -1,0 +1,156 @@
+/**
+ * effects.js – Post-processing (bloom, color grading) and arc effects
+ */
+
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+
+// ── Color grading shader ──
+const ColorGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uIntensity: { value: 0.15 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse;
+    uniform float uIntensity;
+
+    void main() {
+      vec4 col = texture2D(tDiffuse, vUv);
+
+      // Slight blue tint
+      col.rgb += vec3(-0.01, 0.0, 0.03) * uIntensity;
+
+      // Vignette
+      vec2 vig = vUv * (1.0 - vUv);
+      float vigAmount = pow(vig.x * vig.y * 15.0, 0.25);
+      col.rgb *= mix(0.7, 1.0, vigAmount);
+
+      // Slight contrast boost
+      col.rgb = mix(vec3(0.5), col.rgb, 1.0 + uIntensity * 0.3);
+
+      gl_FragColor = col;
+    }
+  `,
+};
+
+/**
+ * Create the post-processing pipeline.
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {THREE.Scene} scene
+ * @param {THREE.Camera} camera
+ * @param {number} width
+ * @param {number} height
+ */
+export function createPostProcessing(renderer, scene, camera, width, height) {
+  const composer = new EffectComposer(renderer);
+
+  const renderPass = new RenderPass(scene, camera);
+  renderPass.clear = false;         // don't clear – we want the camera feed behind
+  renderPass.clearDepth = true;
+  composer.addPass(renderPass);
+
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(width, height),
+    1.2,   // strength
+    0.5,   // radius
+    0.2    // threshold
+  );
+  composer.addPass(bloomPass);
+
+  const gradePass = new ShaderPass(ColorGradeShader);
+  composer.addPass(gradePass);
+
+  return { composer, bloomPass, gradePass, renderPass };
+}
+
+// ── Electrical arcs ──
+
+const ARC_COUNT = 6;
+const ARC_SEGMENTS = 20;
+
+export class ElectricalArcs {
+  constructor() {
+    this.group = new THREE.Group();
+    this.arcs = [];
+    this.time = 0;
+
+    for (let i = 0; i < ARC_COUNT; i++) {
+      const points = [];
+      for (let j = 0; j <= ARC_SEGMENTS; j++) {
+        points.push(new THREE.Vector3(0, 0, 0));
+      }
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      const mat = new THREE.LineBasicMaterial({
+        color: new THREE.Color(0.3, 0.7, 1.0),
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+        linewidth: 1,
+      });
+      const line = new THREE.Line(geo, mat);
+      this.arcs.push({ line, geo, mat });
+      this.group.add(line);
+    }
+  }
+
+  update(dt, intensity) {
+    this.time += dt;
+
+    for (let a = 0; a < this.arcs.length; a++) {
+      const arc = this.arcs[a];
+      const positions = arc.geo.attributes.position;
+
+      // Random direction for this arc
+      const baseAngle = (a / ARC_COUNT) * Math.PI * 2 + this.time * 0.5;
+      const basePhi = Math.sin(this.time * 1.5 + a) * 0.5 + 0.5;
+
+      for (let j = 0; j <= ARC_SEGMENTS; j++) {
+        const t = j / ARC_SEGMENTS;
+        const radius = t * 0.18;
+
+        // Direction
+        const dx = Math.cos(baseAngle) * Math.sin(basePhi * Math.PI);
+        const dy = Math.cos(basePhi * Math.PI);
+        const dz = Math.sin(baseAngle) * Math.sin(basePhi * Math.PI);
+
+        // Lightning jitter
+        const jitter = (1 - t) * 0.03 * intensity;
+        const jx = (Math.random() - 0.5) * jitter;
+        const jy = (Math.random() - 0.5) * jitter;
+        const jz = (Math.random() - 0.5) * jitter;
+
+        positions.array[j * 3] = dx * radius + jx;
+        positions.array[j * 3 + 1] = dy * radius + jy;
+        positions.array[j * 3 + 2] = dz * radius + jz;
+      }
+      positions.needsUpdate = true;
+
+      // Flicker visibility
+      const flicker = Math.random();
+      arc.mat.opacity = flicker > 0.4 ? intensity * 0.6 : 0;
+    }
+  }
+
+  setPosition(x, y, z) {
+    this.group.position.set(x, y, z);
+  }
+
+  dispose() {
+    for (const arc of this.arcs) {
+      arc.geo.dispose();
+      arc.mat.dispose();
+    }
+  }
+}

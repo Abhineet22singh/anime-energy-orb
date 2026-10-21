@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Anime Energy Orb</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Loading Screen -->
+  <div id="loading-screen">
+    <div class="loader-container">
+      <div class="loader-ring"></div>
+      <h1 class="loader-title">ENERGY ORB</h1>
+      <p class="loader-subtitle">Loading hand tracking model…</p>
+      <div class="loader-bar"><div class="loader-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="hidden">
+    <!-- Camera background -->
+    <video id="camera-feed" autoplay playsinline muted></video>
+    <canvas id="three-canvas"></canvas>
+
+    <!-- Top bar -->
+    <div id="top-bar">
+      <div class="status-group">
+        <span id="status-camera" class="status-pill offline">CAM</span>
+        <span id="status-tracking" class="status-pill offline">HAND</span>
+        <span id="status-gesture" class="status-pill">—</span>
+      </div>
+      <div class="title-group">
+        <span class="app-title">ENERGY ORB</span>
+      </div>
+      <div class="action-group">
+        <button id="btn-screenshot" class="icon-btn" title="Screenshot">📸</button>
+        <button id="btn-fullscreen" class="icon-btn" title="Fullscreen">⛶</button>
+      </div>
+    </div>
+
+    <!-- Bottom controls -->
+    <div id="bottom-bar">
+      <button id="btn-start" class="primary-btn">▶ Start Experience</button>
+      <button id="btn-stop" class="primary-btn hidden">■ Stop Camera</button>
+      <button id="btn-demo" class="secondary-btn">🖱 Demo Mode</button>
+      <button id="btn-reset" class="secondary-btn">↺ Reset</button>
+    </div>
+
+    <!-- Side panel -->
+    <div id="side-panel" class="collapsed">
+      <button id="btn-panel-toggle" class="panel-toggle">⚙</button>
+      <div class="panel-content">
+        <h3>Controls</h3>
+        <label>Orb Size <input type="range" id="slider-orb-size" min="0.2" max="3" step="0.1" value="1"></label>
+        <label>Energy Intensity <input type="range" id="slider-energy" min="0.1" max="3" step="0.1" value="1"></label>
+        <label>Smoke Density <input type="range" id="slider-smoke" min="0" max="2" step="0.1" value="1"></label>
+        <label>Particle Density <input type="range" id="slider-particles" min="0" max="2" step="0.1" value="1"></label>
+        <hr>
+        <label class="toggle-label"><input type="checkbox" id="toggle-bloom" checked> Bloom</label>
+        <label class="toggle-label"><input type="checkbox" id="toggle-smoke" checked> Smoke</label>
+        <label class="toggle-label"><input type="checkbox" id="toggle-particles" checked> Particles</label>
+        <label class="toggle-label"><input type="checkbox" id="toggle-arcs" checked> Arcs</label>
+        <hr>
+        <div class="gesture-help">
+          <h4>Gestures</h4>
+          <p>🖐 Open palm → Summon orb</p>
+          <p>✊ Fist → Charge orb</p>
+          <p>🤏 Pinch → Resize</p>
+          <p>💨 Fast move → Trails</p>
+          <p>🙌 Two palms → Mega orb</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
